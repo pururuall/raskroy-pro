@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Stock, Part, CutConfig, CuttingPlan, DocumentMeta, AppSettings } from "./types";
+import {
+  Stock,
+  Part,
+  CutConfig,
+  CuttingPlan,
+  DocumentMeta,
+  AppSettings,
+  UpdateCheckResult,
+  UpdateProgressEvent,
+} from "./types";
 import { StockTable } from "./components/StockTable";
 import { PartsTable, DEFAULT_ANGLE_PRESETS } from "./components/PartsTable";
 import { ConfigPanel } from "./components/ConfigPanel";
@@ -13,6 +22,8 @@ import { ImportExcelModal } from "./components/ImportExcelModal";
 import { MobilLogo } from "./components/MobilLogo";
 import { downloadSampleExcel } from "./utils/excelImport";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AlertCircle,
   FileText,
@@ -49,6 +60,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   calcMode: "instant",
   timerSeconds: 10,
   autoRecalcOnFocus: true,
+  autoCheckUpdates: true,
   anglePresets: DEFAULT_ANGLE_PRESETS,
   companyName: "АО «Мобиль»",
   companyLogo: "mobil",
@@ -96,6 +108,14 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTabType>("refresh");
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
+
+  // App Version & GitHub Releases Auto-Updater state
+  const [appVersion, setAppVersion] = useState<string>("0.3.0");
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgressEvent | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // Timer countdown state (for 'timer' mode)
   const [timerSecondsLeft, setTimerSecondsLeft] = useState<number>(settings.timerSeconds);
@@ -252,6 +272,76 @@ export default function App() {
     setIsDirty(true);
   };
 
+  // Check GitHub Releases for updates
+  const checkForUpdates = useCallback(async () => {
+    if (!isTauri()) return;
+    setUpdateError(null);
+    setUpdateChecking(true);
+    try {
+      const res = await invoke<UpdateCheckResult>("check_for_updates");
+      setUpdateInfo(res);
+    } catch (err: any) {
+      setUpdateError(typeof err === "string" ? err : err.message || "Ошибка проверки обновлений");
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, []);
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (!isTauri() || !updateInfo?.download_url || !updateInfo?.asset_name) return;
+    setUpdateError(null);
+    setUpdateDownloading(true);
+    setUpdateProgress({ downloaded: 0, total: updateInfo.asset_size || 0, percent: 0, stage: "downloading" });
+    try {
+      await invoke("download_and_install_update", {
+        downloadUrl: updateInfo.download_url,
+        assetName: updateInfo.asset_name,
+      });
+    } catch (err: any) {
+      setUpdateDownloading(false);
+      setUpdateError(typeof err === "string" ? err : err.message || "Ошибка установки обновления");
+    }
+  }, [updateInfo]);
+
+  const handleOpenReleasePage = useCallback(async (url: string) => {
+    try {
+      if (isTauri()) {
+        await openUrl(url);
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
+  // Load compiled version, subscribe to download progress, and run startup update check
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke<string>("get_app_version")
+      .then((ver) => setAppVersion(ver))
+      .catch(() => {});
+
+    let unlisten: (() => void) | undefined;
+    listen<UpdateProgressEvent>("update-progress", (event) => {
+      setUpdateProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    if (settings.autoCheckUpdates) {
+      startupTimer = setTimeout(() => {
+        checkForUpdates();
+      }, 1500);
+    }
+
+    return () => {
+      if (unlisten) unlisten();
+      if (startupTimer) clearTimeout(startupTimer);
+    };
+  }, []); // Run once on app mount
+
   const handleImportParts = (newParts: Part[], replace: boolean) => {
     if (replace) {
       setParts(newParts);
@@ -268,6 +358,8 @@ export default function App() {
           isOpen={isSidebarOpen}
           onClose={() => handleSidebarToggle(false)}
           settings={settings}
+          appVersion={appVersion}
+          updateAvailableVersion={updateInfo?.has_update ? updateInfo.latest_version : null}
           isDirty={isDirty}
           loading={loading}
           calcTimeMs={calcTimeMs}
@@ -460,7 +552,7 @@ export default function App() {
 
           {/* Footer */}
           <footer className="border-t border-white/[0.06] py-2.5 px-6 text-xs text-[#6b7280] font-mono flex items-center justify-between no-print">
-            <span>{settings.companyName} &bull; Линейный раскрой v0.2.0 &bull; Rust Core</span>
+            <span>{settings.companyName} &bull; Линейный раскрой v{appVersion} &bull; Rust Core</span>
             <span>Материал: {meta.material || "Не указан"}</span>
           </footer>
         </div>
@@ -477,6 +569,15 @@ export default function App() {
           calcTimeMs={calcTimeMs}
           onManualRefresh={runCalculation}
           isCalculating={loading}
+          appVersion={appVersion}
+          updateInfo={updateInfo}
+          updateChecking={updateChecking}
+          updateDownloading={updateDownloading}
+          updateProgress={updateProgress}
+          updateError={updateError}
+          onCheckUpdates={checkForUpdates}
+          onInstallUpdate={handleInstallUpdate}
+          onOpenReleasePage={handleOpenReleasePage}
         />
 
         {/* Excel Import Modal */}

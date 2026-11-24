@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { AppSettings, CutConfig, AnglePreset } from "../types";
+import {
+  AppSettings,
+  CutConfig,
+  AnglePreset,
+  UpdateCheckResult,
+  UpdateProgressEvent,
+} from "../types";
 import { MobilLogo } from "./MobilLogo";
 import { DEFAULT_ANGLE_PRESETS } from "./PartsTable";
 import {
@@ -13,9 +19,14 @@ import {
   RotateCcw,
   Cpu,
   Clock,
+  ArrowUpCircle,
+  Download,
+  ExternalLink,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
-export type SettingsTabType = "refresh" | "angles" | "cutting" | "branding";
+export type SettingsTabType = "refresh" | "angles" | "cutting" | "branding" | "update";
 
 interface SettingsDrawerProps {
   isOpen: boolean;
@@ -28,6 +39,15 @@ interface SettingsDrawerProps {
   calcTimeMs: number | null;
   onManualRefresh: () => void;
   isCalculating: boolean;
+  appVersion: string;
+  updateInfo: UpdateCheckResult | null;
+  updateChecking: boolean;
+  updateDownloading: boolean;
+  updateProgress: UpdateProgressEvent | null;
+  updateError: string | null;
+  onCheckUpdates: () => void;
+  onInstallUpdate: () => void;
+  onOpenReleasePage: (url: string) => void;
 }
 
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
@@ -41,6 +61,15 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   calcTimeMs,
   onManualRefresh,
   isCalculating,
+  appVersion,
+  updateInfo,
+  updateChecking,
+  updateDownloading,
+  updateProgress,
+  updateError,
+  onCheckUpdates,
+  onInstallUpdate,
+  onOpenReleasePage,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTabType>(initialTab);
 
@@ -126,10 +155,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           </div>
 
           {/* Navigation Tabs */}
-          <div className="grid grid-cols-4 border-b border-white/[0.06] bg-[#141416] px-2 pt-2 gap-1">
+          <div className="grid grid-cols-5 border-b border-white/[0.06] bg-[#141416] px-2 pt-2 gap-1">
             <button
               onClick={() => setActiveTab("refresh")}
-              className={`flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 px-1.5 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
                 activeTab === "refresh"
                   ? "bg-[#17171a] text-[#ededed] border-t-2 border-[#dd4b19]"
                   : "text-[#9ea3ae] hover:text-[#ededed]"
@@ -141,7 +170,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
             <button
               onClick={() => setActiveTab("angles")}
-              className={`flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 px-1.5 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
                 activeTab === "angles"
                   ? "bg-[#17171a] text-[#ededed] border-t-2 border-[#dd4b19]"
                   : "text-[#9ea3ae] hover:text-[#ededed]"
@@ -153,7 +182,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
             <button
               onClick={() => setActiveTab("cutting")}
-              className={`flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 px-1.5 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
                 activeTab === "cutting"
                   ? "bg-[#17171a] text-[#ededed] border-t-2 border-[#dd4b19]"
                   : "text-[#9ea3ae] hover:text-[#ededed]"
@@ -165,14 +194,29 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
             <button
               onClick={() => setActiveTab("branding")}
-              className={`flex items-center justify-center gap-1.5 px-2 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
+              className={`flex items-center justify-center gap-1 px-1.5 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer ${
                 activeTab === "branding"
                   ? "bg-[#17171a] text-[#ededed] border-t-2 border-[#dd4b19]"
                   : "text-[#9ea3ae] hover:text-[#ededed]"
               }`}
             >
               <Building2 className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Брендинг</span>
+              <span className="truncate">Бренд</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("update")}
+              className={`flex items-center justify-center gap-1 px-1.5 py-2 text-[11px] rounded-t font-medium transition-colors cursor-pointer relative ${
+                activeTab === "update"
+                  ? "bg-[#17171a] text-[#ededed] border-t-2 border-[#dd4b19]"
+                  : "text-[#9ea3ae] hover:text-[#ededed]"
+              }`}
+            >
+              <ArrowUpCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Версия</span>
+              {updateInfo?.has_update && (
+                <span className="w-1.5 h-1.5 rounded-full bg-[#dd4b19] shrink-0" />
+              )}
             </button>
           </div>
 
@@ -602,6 +646,171 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     className="w-full bg-[#121214] border border-white/[0.08] rounded px-3 py-1.5 text-[#ededed] text-xs focus:outline-none focus:border-[#dd4b19]"
                   />
                 </div>
+              </div>
+            )}
+
+            {/* TAB 5: APP UPDATES VIA GITHUB RELEASES */}
+            {activeTab === "update" && (
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-[#ededed] mb-1">Обновление программы</h4>
+                  <p className="text-[11px] text-[#9ea3ae]">
+                    Автоматическая проверка и загрузка новых версий из релизов GitHub
+                  </p>
+                </div>
+
+                {/* Current Version Info */}
+                <div className="p-3.5 bg-[#121214] border border-white/[0.08] rounded-lg space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#9ea3ae]">Установленная версия:</span>
+                    <span className="font-mono text-[#ededed] font-medium">v{appVersion}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-[#9ea3ae]">Источник релизов:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenReleasePage("https://github.com/pururuall/raskroy-pro/releases")
+                      }
+                      className="font-mono text-[#ededed] hover:text-[#dd4b19] flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>pururuall/raskroy-pro</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2.5 cursor-pointer text-[#ededed]">
+                  <input
+                    type="checkbox"
+                    checked={settings.autoCheckUpdates}
+                    onChange={(e) => updateSetting("autoCheckUpdates", e.target.checked)}
+                    className="rounded bg-[#121214] border-white/20 text-[#dd4b19] focus:ring-0"
+                  />
+                  <span className="text-[11px]">
+                    Проверять обновления автоматически при запуске программы
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={onCheckUpdates}
+                  disabled={updateChecking || updateDownloading}
+                  className="w-full h-9 flex items-center justify-center gap-2 bg-[#202024] hover:bg-[#28282e] text-[#ededed] rounded border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-[#dd4b19] ${updateChecking ? "animate-spin" : ""}`}
+                  />
+                  <span>{updateChecking ? "Проверка GitHub..." : "Проверить обновления"}</span>
+                </button>
+
+                {updateError && (
+                  <div className="p-3 bg-[#1e1517] border border-rose-500/20 rounded-lg text-rose-300 text-[11px] flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{updateError}</span>
+                  </div>
+                )}
+
+                {updateInfo && !updateInfo.has_update && !updateError && (
+                  <div className="p-3.5 bg-[#121214] border border-emerald-500/25 rounded-lg flex items-center gap-2.5 text-[11px]">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div className="font-medium text-[#ededed]">
+                        Установлена актуальная версия (v{updateInfo.current_version})
+                      </div>
+                      {updateInfo.latest_version && (
+                        <div className="text-[#6b7280] font-mono mt-0.5">
+                          Последний релиз на GitHub: v{updateInfo.latest_version}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {updateInfo && updateInfo.has_update && (
+                  <div className="p-4 bg-[#121214] border border-[#dd4b19]/50 rounded-lg space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs font-medium text-[#ededed]">
+                          Доступна версия v{updateInfo.latest_version}
+                        </div>
+                        <div className="text-[11px] text-[#9ea3ae] mt-0.5">
+                          {updateInfo.release_name}
+                        </div>
+                      </div>
+                      {updateInfo.asset_size && (
+                        <span className="text-[10px] font-mono text-[#9ea3ae] bg-[#202024] px-2 py-0.5 rounded">
+                          {(updateInfo.asset_size / (1024 * 1024)).toFixed(2)} МБ
+                        </span>
+                      )}
+                    </div>
+
+                    {updateInfo.release_notes && (
+                      <div className="p-2.5 bg-[#17171a] border border-white/[0.06] rounded text-[11px] text-[#9ea3ae] max-h-36 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                        {updateInfo.release_notes}
+                      </div>
+                    )}
+
+                    {updateDownloading && updateProgress && (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[11px] font-mono text-[#9ea3ae]">
+                          <span>
+                            {updateProgress.stage === "launching"
+                              ? "Запуск установщика..."
+                              : updateProgress.stage === "verifying"
+                              ? "Проверка файла..."
+                              : "Скачивание обновления..."}
+                          </span>
+                          <span className="text-[#ededed]">
+                            {Math.round(updateProgress.percent)}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-[#202024] rounded overflow-hidden">
+                          <div
+                            className="h-full bg-[#dd4b19] transition-all duration-150"
+                            style={{ width: `${Math.min(100, updateProgress.percent)}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1">
+                      {updateInfo.download_url ? (
+                        <button
+                          type="button"
+                          onClick={onInstallUpdate}
+                          disabled={updateDownloading}
+                          className="flex-1 h-9 flex items-center justify-center gap-2 bg-[#dd4b19] hover:bg-[#c53f12] text-white font-medium rounded text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>
+                            {updateDownloading
+                              ? "Загрузка..."
+                              : `Установить v${updateInfo.latest_version}`}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onOpenReleasePage(updateInfo.release_url)}
+                          className="flex-1 h-9 flex items-center justify-center gap-2 bg-[#dd4b19] hover:bg-[#c53f12] text-white font-medium rounded text-xs transition-colors cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Скачать со страницы релиза</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenReleasePage(updateInfo.release_url)}
+                        className="h-9 px-3 bg-[#202024] hover:bg-[#28282e] text-[#ededed] rounded border border-white/[0.08] transition-colors cursor-pointer"
+                        title="Открыть страницу релиза на GitHub"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

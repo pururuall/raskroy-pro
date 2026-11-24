@@ -14,12 +14,15 @@ import {
   Download,
   Layers,
   RotateCcw,
+  ArrowUpCircle,
 } from "lucide-react";
 
 interface LeftSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   settings: AppSettings;
+  appVersion: string;
+  updateAvailableVersion?: string | null;
   isDirty: boolean;
   loading: boolean;
   calcTimeMs: number | null;
@@ -39,6 +42,8 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isOpen,
   onClose,
   settings,
+  appVersion,
+  updateAvailableVersion,
   isDirty,
   loading,
   calcTimeMs,
@@ -88,7 +93,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       <div className="h-12 px-4 border-b border-white/[0.06] flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
           <MobilLogo height={16} showWordmark={true} accentColor="#dd4b19" color="#ededed" />
-          <span className="text-[10px] text-[#6b7280] font-mono">v0.2</span>
+          <span className="text-[10px] text-[#6b7280] font-mono">v{appVersion}</span>
         </div>
 
         <button
@@ -148,7 +153,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <button onClick={() => onOpenSettings("refresh")} className={itemClass}>
             <span className="flex items-center gap-2.5">
               <Clock className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Обновление</span>
+              <span>Таймер расчёта</span>
             </span>
             <span className="text-[10px] font-mono text-[#6b7280] bg-[#1d1d21] px-1.5 py-0.5 rounded">
               {modeBadge}
@@ -170,6 +175,26 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <Building2 className="w-4 h-4 stroke-[1.5] shrink-0" />
               <span>Брендинг и цех</span>
             </span>
+          </button>
+
+          <button onClick={() => onOpenSettings("update")} className={itemClass}>
+            <span className="flex items-center gap-2.5">
+              <ArrowUpCircle
+                className={`w-4 h-4 stroke-[1.5] shrink-0 ${
+                  updateAvailableVersion ? "text-[#dd4b19]" : ""
+                }`}
+              />
+              <span className={updateAvailableVersion ? "text-[#ededed] font-medium" : ""}>
+                Обновление ПО
+              </span>
+            </span>
+            {updateAvailableVersion ? (
+              <span className="text-[10px] font-mono text-white bg-[#dd4b19] px-1.5 py-0.5 rounded">
+                v{updateAvailableVersion}
+              </span>
+            ) : (
+              <span className="text-[10px] font-mono text-[#6b7280]">GitHub</span>
+            )}
           </button>
         </div>
 

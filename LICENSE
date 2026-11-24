@@ -1,21 +1,86 @@
-MIT License
+ПРОПРИЕТАРНАЯ ЛИЦЕНЗИЯ И УСЛОВИЯ ИСПОЛЬЗОВАНИЯ
+(PROPRIETARY LICENSE — ALL RIGHTS RESERVED)
 
 Copyright (c) 2026 pururuall (https://github.com/pururuall)
+Все права защищены / All Rights Reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+================================================================================
+РУССКАЯ ВЕРСИЯ
+================================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Настоящее программное обеспечение, включая исходный код, исполняемые файлы,
+установщики, документацию, шаблоны и графические ресурсы (далее — «Программа»),
+является интеллектуальной собственностью правообладателя pururuall
+(https://github.com/pururuall).
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. ЗАПРЕТ ИСПОЛЬЗОВАНИЯ БЕЗ СОГЛАСИЯ ПРАВООБЛАДАТЕЛЯ
+   Публикация исходного кода или скомпилированных файлов в публичном
+   репозитории на GitHub НЕ предоставляет автоматического права на
+   использование Программы. Любое использование, запуск в рабочих или иных
+   целях, копирование, модификация и распространение Программы допускаются
+   исключительно при наличии предварительного явного согласия правообладателя
+   (pururuall). Использование Программы без такого согласия запрещено.
+
+2. ЗАПРЕТ ПРОДАЖИ И КОММЕРЧЕСКОГО РАСПРОСТРАНЕНИЯ
+   Категорически запрещается продавать, перепродавать, сдавать в аренду,
+   передавать по сублицензии, распространять за плату или в составе платных
+   пакетов услуг данную Программу, её исходный код, исполняемые файлы или
+   любые производные работы на её основе.
+
+3. ОТЗЫВ РАЗРЕШЕНИЯ И ОБЯЗАТЕЛЬНОЕ УДАЛЕНИЕ ВСЕХ КОПИЙ
+   Правообладатель (pururuall) имеет безусловное право в любой момент времени
+   в одностороннем порядке запретить дальнейшее использование Программы и
+   отозвать ранее выданное согласие (в том числе путём публикации заявления в
+   репозитории GitHub или направления уведомления).
+   При заявлении правообладателя о прекращении использования любой пользователь
+   и любая организация обязаны немедленно прекратить использование Программы и
+   полностью удалить со всех носителей все имеющиеся копии Программы (включая
+   исходный код, скомпилированные .exe файлы, установщики, архивы и
+   модифицированные версии).
+
+4. ОТКАЗ ОТ ГАРАНТИЙ И ОГРАНИЧЕНИЕ ОТВЕТСТВЕННОСТИ
+   ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ НА УСЛОВИЯХ «КАК ЕСТЬ» («AS IS»), БЕЗ КАКИХ-ЛИБО
+   ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ ГАРАНТИЙ, ВКЛЮЧАЯ ГАРАНТИИ БЕЗОШИБОЧНОЙ РАБОТЫ,
+   ТОЧНОСТИ РАСЧЁТОВ И ПРИГОДНОСТИ ДЛЯ КОНКРЕТНЫХ ПРОИЗВОДСТВЕННЫХ ЦЕЛЕЙ.
+
+   ПРАВООБЛАДАТЕЛЬ (pururuall) НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ НЕ НЕСЁТ
+   ОТВЕТСТВЕННОСТИ ЗА ОШИБКИ В ПРОГРАММЕ, СБОИ, НЕКОРРЕКТНЫЕ СХЕМЫ РАСКРОЯ,
+   ОШИБКИ УГЛОВ ИЛИ ДОПУСКОВ, А ТАКЖЕ ЗА ЛЮБЫЕ ПРЯМЫЕ, КОСВЕННЫЕ, СЛУЧАЙНЫЕ
+   ИЛИ СОПУТСТВУЮЩИЕ УБЫТКИ (ВКЛЮЧАЯ БРАК ПРОДУКЦИИ, ПОРЧУ ИЛИ ПЕРЕРАСХОД
+   МАТЕРИАЛА, ПРОСТОЙ СТАНКОВ, ПОТЕРЮ ДАННЫХ ИЛИ УПУЩЕННУЮ ВЫГОДУ),
+   ВОЗНИКШИЕ В РЕЗУЛЬТАТЕ ИСПОЛЬЗОВАНИЯ ИЛИ НЕВОЗМОЖНОСТИ ИСПОЛЬЗОВАНИЯ
+   ПРОГРАММЫ.
+
+================================================================================
+ENGLISH VERSION
+================================================================================
+
+This software, including source code, binaries, installers, documentation,
+templates, and visual assets (the "Software"), is the proprietary property of
+the copyright holder: pururuall (https://github.com/pururuall).
+
+1. NO USE WITHOUT EXPLICIT CONSENT
+   Public visibility of this repository does NOT grant an open-source license.
+   Using, running, copying, modifying, or distributing the Software in any
+   form is strictly prohibited without the prior explicit consent of pururuall.
+
+2. NO SALE OR COMMERCIAL DISTRIBUTION
+   You are strictly prohibited from selling, reselling, renting, sublicensing,
+   or commercially distributing the Software, its source code, compiled
+   executables, or any derivative works.
+
+3. REVOCATION AND MANDATORY DELETION
+   The copyright holder (pururuall) reserves the absolute right to revoke any
+   granted permission and prohibit use of the Software at any time by issuing
+   a notice (including via this GitHub repository or written communication).
+   Upon such declaration, all use of the Software must cease immediately, and
+   all copies (source code, executables, installers, backups, and derivatives)
+   must be permanently deleted from all systems and storage media.
+
+4. NO WARRANTY AND NO LIABILITY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED. IN NO EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER (pururuall) BE
+   LIABLE FOR ANY SOFTWARE BUGS, CALCULATION ERRORS, MATERIAL WASTE, SCRAP,
+   EQUIPMENT DOWNTIME, LOST PROFITS, DATA LOSS, OR ANY DIRECT, INDIRECT,
+   INCIDENTAL, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE OR INABILITY TO
+   USE THE SOFTWARE.

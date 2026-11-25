@@ -6,6 +6,8 @@ import {
   CuttingPlan,
   DocumentMeta,
   AppSettings,
+  AppTheme,
+  DEFAULT_REPORT_CONFIG,
   UpdateCheckResult,
   UpdateProgressEvent,
 } from "./types";
@@ -20,6 +22,8 @@ import { SettingsDrawer, SettingsTabType } from "./components/SettingsDrawer";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { ImportExcelModal } from "./components/ImportExcelModal";
 import { MobilLogo } from "./components/MobilLogo";
+import { ResizeHandle } from "./components/ResizeHandle";
+import { TitleBar } from "./components/TitleBar";
 import { downloadSampleExcel } from "./utils/excelImport";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -30,6 +34,8 @@ import {
   Sliders,
   RefreshCw,
   PanelLeft,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 // Benchmark dataset from "таблица раскроя.xlsm"
@@ -57,6 +63,8 @@ const DEFAULT_CONFIG: CutConfig = {
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
+  theme: "light",
+  barDensity: "compact",
   calcMode: "instant",
   timerSeconds: 10,
   autoRecalcOnFocus: true,
@@ -68,6 +76,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   companyWebsite: "mobil66.ru",
   machineName: "Двухголовочная усорезная пила",
   operatorName: "Иванов А. С.",
+  reportConfig: DEFAULT_REPORT_CONFIG,
 };
 
 export default function App() {
@@ -87,7 +96,15 @@ export default function App() {
     try {
       const saved = localStorage.getItem("raskroy_settings");
       if (saved) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          reportConfig: {
+            ...DEFAULT_REPORT_CONFIG,
+            ...(parsed?.reportConfig || {}),
+          },
+        };
       }
     } catch (e) {
       console.warn("Failed to load settings from storage", e);
@@ -95,7 +112,7 @@ export default function App() {
     return DEFAULT_SETTINGS;
   });
 
-  // Left sidebar & left-docked panels visibility
+  // Left sidebar & resizable split layout state
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem("raskroy_sidebar_open");
@@ -104,13 +121,36 @@ export default function App() {
       return true;
     }
   });
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("raskroy_sidebar_width");
+      const val = saved ? parseInt(saved, 10) : 236;
+      return isNaN(val) ? 236 : Math.max(190, Math.min(340, val));
+    } catch {
+      return 236;
+    }
+  });
+
+  const [leftPanePct, setLeftPanePct] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("raskroy_left_pane_pct");
+      const val = saved ? parseFloat(saved) : 44;
+      return isNaN(val) ? 44 : Math.max(28, Math.min(68, val));
+    } catch {
+      return 44;
+    }
+  });
+
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabType>("refresh");
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
 
   // App Version & GitHub Releases Auto-Updater state
-  const [appVersion, setAppVersion] = useState<string>("0.3.0");
+  const [appVersion, setAppVersion] = useState<string>("0.4.0");
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
@@ -128,6 +168,11 @@ export default function App() {
     orderNumber: "ЗК-104",
   });
 
+  // Sync theme attribute on root <html>
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", settings.theme);
+  }, [settings.theme]);
+
   const handleSidebarToggle = (open: boolean) => {
     setIsSidebarOpen(open);
     try {
@@ -135,6 +180,32 @@ export default function App() {
     } catch {
       // ignore storage errors
     }
+  };
+
+  const handleSidebarResize = (deltaPx: number) => {
+    setSidebarWidth((prev) => {
+      const next = Math.max(190, Math.min(340, prev + deltaPx));
+      try {
+        localStorage.setItem("raskroy_sidebar_width", String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleMainSplitResize = (deltaPx: number) => {
+    const containerW = splitContainerRef.current?.clientWidth || 1200;
+    const deltaPct = (deltaPx / containerW) * 100;
+    setLeftPanePct((prev) => {
+      const next = Math.max(28, Math.min(68, prev + deltaPct));
+      try {
+        localStorage.setItem("raskroy_left_pane_pct", next.toFixed(2));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
   };
 
   const handleOpenSettings = (tab: SettingsTabType) => {
@@ -150,6 +221,10 @@ export default function App() {
     } catch (e) {
       console.warn("Failed to persist settings", e);
     }
+  };
+
+  const handleToggleTheme = (theme: AppTheme) => {
+    handleSettingsChange({ ...settings, theme });
   };
 
   // Perform calculation
@@ -291,7 +366,12 @@ export default function App() {
     if (!isTauri() || !updateInfo?.download_url || !updateInfo?.asset_name) return;
     setUpdateError(null);
     setUpdateDownloading(true);
-    setUpdateProgress({ downloaded: 0, total: updateInfo.asset_size || 0, percent: 0, stage: "downloading" });
+    setUpdateProgress({
+      downloaded: 0,
+      total: updateInfo.asset_size || 0,
+      percent: 0,
+      stage: "downloading",
+    });
     try {
       await invoke("download_and_install_update", {
         downloadUrl: updateInfo.download_url,
@@ -352,41 +432,59 @@ export default function App() {
 
   return (
     <>
-      <div className="min-h-screen bg-[#121214] text-[#ededed] flex font-sans no-print selection:bg-[#dd4b19]/30">
-        {/* Collapsible Left Navigation Menu */}
-        <LeftSidebar
-          isOpen={isSidebarOpen}
-          onClose={() => handleSidebarToggle(false)}
-          settings={settings}
-          appVersion={appVersion}
-          updateAvailableVersion={updateInfo?.has_update ? updateInfo.latest_version : null}
-          isDirty={isDirty}
-          loading={loading}
-          calcTimeMs={calcTimeMs}
-          lastCalculatedAt={lastCalculatedAt}
-          timerSecondsLeft={timerSecondsLeft}
-          hasPlan={Boolean(plan)}
-          onCalculate={runCalculation}
-          onOpenSettings={handleOpenSettings}
-          onOpenReport={() => setIsReportOpen(true)}
-          onOpenImport={() => setIsImportModalOpen(true)}
-          onDownloadSample={downloadSampleExcel}
-          onLoadExample={loadExample}
-          onClearAll={clearAll}
-        />
+      <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans no-print selection:bg-[#dd4b19]/20 border border-[var(--border-main)]">
+        {/* Custom Frameless App Title Bar */}
+        <TitleBar appVersion={appVersion} documentTitle={meta.title} />
 
-        {/* Right / Main Fluid Workspace */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          {/* Collapsible & Horizontally Resizable Left Navigation Menu */}
+          <LeftSidebar
+            isOpen={isSidebarOpen}
+            widthPx={sidebarWidth}
+            onClose={() => handleSidebarToggle(false)}
+            settings={settings}
+            onToggleTheme={handleToggleTheme}
+            appVersion={appVersion}
+            updateAvailableVersion={updateInfo?.has_update ? updateInfo.latest_version : null}
+            isDirty={isDirty}
+            loading={loading}
+            calcTimeMs={calcTimeMs}
+            lastCalculatedAt={lastCalculatedAt}
+            timerSecondsLeft={timerSecondsLeft}
+            hasPlan={Boolean(plan)}
+            onCalculate={runCalculation}
+            onOpenSettings={handleOpenSettings}
+            onOpenReport={() => setIsReportOpen(true)}
+            onOpenImport={() => setIsImportModalOpen(true)}
+            onDownloadSample={downloadSampleExcel}
+            onLoadExample={loadExample}
+            onClearAll={clearAll}
+          />
+
+          {isSidebarOpen && (
+            <ResizeHandle
+              orientation="vertical"
+              onResize={handleSidebarResize}
+              onReset={() => {
+                setSidebarWidth(236);
+                localStorage.setItem("raskroy_sidebar_width", "236");
+              }}
+              title="Потяните для изменения ширины бокового меню"
+            />
+          )}
+
+          {/* Right / Main Fluid Workspace */}
+          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
           {/* Clean Top Toolbar & Document Metadata */}
-          <header className="border-b border-white/[0.08] bg-[#17171a] px-4 md:px-6 py-2 no-print">
+          <header className="border-b border-[var(--border-main)] bg-[var(--bg-surface)] px-4 md:px-5 py-2 no-print">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* Left cluster: Expand menu button (when hidden) + Document / Material inputs */}
+              {/* Left cluster */}
               <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
                 {!isSidebarOpen && (
-                  <div className="flex items-center gap-2.5 pr-3 border-r border-white/[0.08]">
+                  <div className="flex items-center gap-2.5 pr-3 border-r border-[var(--border-main)]">
                     <button
                       onClick={() => handleSidebarToggle(true)}
-                      className="flex items-center gap-1.5 text-xs text-[#ededed] bg-[#202024] hover:bg-[#28282e] px-2.5 py-1.5 rounded border border-white/[0.08] transition-colors cursor-pointer"
+                      className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors cursor-pointer"
                       title="Показать левую панель меню (Ctrl+B)"
                     >
                       <PanelLeft className="w-4 h-4 stroke-[1.5] text-[#dd4b19]" />
@@ -396,52 +494,69 @@ export default function App() {
                       height={16}
                       showWordmark={true}
                       accentColor="#dd4b19"
-                      color="#ededed"
+                      color="var(--text-primary)"
                       className="hidden sm:inline-block"
                     />
                   </div>
                 )}
 
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[#6b7280]">Документ:</span>
+                  <span className="text-[var(--text-muted)]">Документ:</span>
                   <input
                     type="text"
                     value={meta.title}
                     onChange={(e) => setMeta({ ...meta, title: e.target.value })}
                     placeholder="Название заказа / наряда"
-                    className="bg-[#121214] border border-white/[0.08] rounded px-2.5 py-1 text-[#ededed] text-xs focus:outline-none focus:border-[#dd4b19] w-44 md:w-56"
+                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[#dd4b19] w-44 md:w-56"
                   />
                 </div>
 
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[#6b7280]">Материал:</span>
+                  <span className="text-[var(--text-muted)]">Материал:</span>
                   <input
                     type="text"
                     value={meta.material}
                     onChange={(e) => setMeta({ ...meta, material: e.target.value })}
                     placeholder="Название материала (профиль, артикул...)"
-                    className="bg-[#121214] border border-white/[0.08] rounded px-2.5 py-1 text-[#ededed] text-xs focus:outline-none focus:border-[#dd4b19] w-48 md:w-72"
+                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[#dd4b19] w-48 md:w-72"
                   />
                 </div>
 
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[#6b7280]">Дата:</span>
+                  <span className="text-[var(--text-muted)]">Дата:</span>
                   <input
                     type="text"
                     value={meta.date}
                     onChange={(e) => setMeta({ ...meta, date: e.target.value })}
-                    className="bg-[#121214] border border-white/[0.08] rounded px-2 py-1 text-[#ededed] text-xs font-mono w-24 text-center focus:outline-none focus:border-[#dd4b19]"
+                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] text-xs font-mono w-24 text-center focus:outline-none focus:border-[#dd4b19]"
                   />
                 </div>
               </div>
 
-              {/* Right cluster: Quick action icons when sidebar is hidden, or clean timestamp */}
+              {/* Right cluster */}
               <div className="flex items-center gap-2 shrink-0">
                 {calcTimeMs !== null && (
-                  <span className="text-[11px] text-[#6b7280] font-mono hidden xl:inline-block">
+                  <span className="text-[11px] text-[var(--text-muted)] font-mono hidden xl:inline-block">
                     {calcTimeMs} мс {lastCalculatedAt && `• ${lastCalculatedAt}`}
                   </span>
                 )}
+
+                {/* Quick theme toggle */}
+                <button
+                  onClick={() => handleToggleTheme(settings.theme === "light" ? "dark" : "light")}
+                  className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] rounded border border-[var(--border-main)] transition-colors cursor-pointer"
+                  title={
+                    settings.theme === "light"
+                      ? "Переключить на тёмную тему"
+                      : "Переключить на светлую тему"
+                  }
+                >
+                  {settings.theme === "light" ? (
+                    <Moon className="w-4 h-4 stroke-[1.5]" />
+                  ) : (
+                    <Sun className="w-4 h-4 stroke-[1.5]" />
+                  )}
+                </button>
 
                 {!isSidebarOpen && (
                   <>
@@ -451,7 +566,7 @@ export default function App() {
                       className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-50 ${
                         isDirty && settings.calcMode !== "instant"
                           ? "bg-[#dd4b19] hover:bg-[#c53f12] text-white"
-                          : "bg-[#202024] hover:bg-[#28282e] text-[#ededed] border border-white/[0.08]"
+                          : "bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-main)]"
                       }`}
                     >
                       <RefreshCw
@@ -465,7 +580,7 @@ export default function App() {
                     <button
                       onClick={() => setIsReportOpen(true)}
                       disabled={!plan}
-                      className="flex items-center gap-1.5 text-xs text-[#ededed] bg-[#202024] hover:bg-[#28282e] px-2.5 py-1.5 rounded border border-white/[0.08] transition-colors disabled:opacity-40 cursor-pointer"
+                      className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors disabled:opacity-40 cursor-pointer"
                     >
                       <FileText className="w-3.5 h-3.5 stroke-[1.5] text-[#dd4b19]" />
                       <span className="hidden sm:inline">Отчёт</span>
@@ -473,7 +588,7 @@ export default function App() {
 
                     <button
                       onClick={() => handleOpenSettings("refresh")}
-                      className="p-1.5 text-[#9ea3ae] hover:text-[#ededed] bg-[#202024] hover:bg-[#28282e] rounded border border-white/[0.08] transition-colors cursor-pointer"
+                      className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] rounded border border-[var(--border-main)] transition-colors cursor-pointer"
                       title="Настройки"
                     >
                       <Sliders className="w-4 h-4 stroke-[1.5]" />
@@ -484,18 +599,21 @@ export default function App() {
             </div>
           </header>
 
-          {/* Main Workspace Grid */}
-          <main className="flex-1 w-full max-w-[1920px] p-4 md:p-6 space-y-4 no-print">
+          {/* Main Workspace Resizable Split Grid */}
+          <main ref={splitContainerRef} className="flex-1 w-full p-3.5 md:p-5 space-y-3 no-print">
             {error && (
-              <div className="p-3 bg-[#1e1517] border border-rose-500/20 rounded text-rose-300 text-xs flex items-center gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded text-rose-600 dark:text-rose-300 text-xs flex items-center gap-2.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
-              {/* Left Column: Specifications & Parameters */}
-              <div className="xl:col-span-6 2xl:col-span-5 space-y-4">
+            <div
+              className="flex flex-col xl:flex-row items-stretch gap-3 xl:gap-0"
+              style={{ "--left-pane-pct": `${leftPanePct}%` } as React.CSSProperties}
+            >
+              {/* Left Resizable Column: Specifications & Parameters */}
+              <div className="xl-split-left space-y-3 xl:pr-1.5">
                 <ConfigPanel config={config} onChange={setConfig} />
                 <StockTable stocks={stocks} onChange={setStocks} />
                 <PartsTable
@@ -508,18 +626,29 @@ export default function App() {
                 />
               </div>
 
-              {/* Right Column: Key Stats & Cutting Diagrams */}
-              <div className="xl:col-span-6 2xl:col-span-7 space-y-4">
+              {/* Draggable Horizontal Splitter */}
+              <ResizeHandle
+                orientation="vertical"
+                onResize={handleMainSplitResize}
+                onReset={() => {
+                  setLeftPanePct(44);
+                  localStorage.setItem("raskroy_left_pane_pct", "44");
+                }}
+                title="Потяните, чтобы растянуть или сузить колонки таблиц и карт раскроя (двойной клик — сброс)"
+              />
+
+              {/* Right Resizable Column: Key Stats & Cutting Diagrams */}
+              <div className="flex-1 min-w-0 w-full space-y-3 xl:pl-1.5">
                 {plan && (
                   <>
                     <SummaryStats summary={plan.summary} patternCount={plan.patterns.length} />
 
                     {plan.unplaced.length > 0 && (
-                      <div className="p-3 bg-[#1e1b15] border border-amber-500/20 rounded text-amber-300 text-xs">
-                        <div className="font-medium mb-1">
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-amber-800 dark:text-amber-200 text-xs">
+                        <div className="font-semibold mb-1">
                           Недостаточно заготовок на складе для позиций:
                         </div>
-                        <ul className="list-disc list-inside space-y-0.5 text-amber-200/80 font-mono text-[11px]">
+                        <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px]">
                           {plan.unplaced.map((p, idx) => (
                             <li key={idx}>
                               Длина {p.length} мм — {p.quantity} шт.
@@ -534,14 +663,22 @@ export default function App() {
                       hoveredLength={hoveredLength}
                       onHoverLength={setHoveredLength}
                       onOpenReport={() => setIsReportOpen(true)}
+                      barDensity={settings.barDensity}
+                      onBarDensityChange={(density) =>
+                        handleSettingsChange({ ...settings, barDensity: density })
+                      }
+                      trimLeft={config.trim_left}
+                      trimRight={config.trim_right}
                     />
                   </>
                 )}
 
                 {!plan && !loading && (
-                  <div className="bg-[#17171a] border border-white/[0.08] rounded-lg p-16 text-center space-y-2">
-                    <div className="text-xs text-[#ededed] font-medium">Нет активного расчёта</div>
-                    <p className="text-[11px] text-[#6b7280] max-w-sm mx-auto">
+                  <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] rounded-lg p-16 text-center space-y-2">
+                    <div className="text-xs text-[var(--text-primary)] font-semibold">
+                      Нет активного расчёта
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto">
                       Заполните склад и спецификацию деталей, затем нажмите «Обновить» или Ctrl+Enter.
                     </p>
                   </div>
@@ -550,11 +687,14 @@ export default function App() {
             </div>
           </main>
 
-          {/* Footer */}
-          <footer className="border-t border-white/[0.06] py-2.5 px-6 text-xs text-[#6b7280] font-mono flex items-center justify-between no-print">
-            <span>{settings.companyName} &bull; Линейный раскрой v{appVersion} &bull; Rust Core</span>
+        {/* Footer */}
+          <footer className="border-t border-[var(--border-main)] bg-[var(--bg-surface)] py-2 px-5 text-[11px] text-[var(--text-muted)] font-mono flex items-center justify-between no-print mt-auto">
+            <span>
+              {settings.companyName} &bull; Линейный раскрой v{appVersion} &bull; Rust Core
+            </span>
             <span>Материал: {meta.material || "Не указан"}</span>
           </footer>
+        </div>
         </div>
 
         {/* Left Slide-out Settings Drawer */}
@@ -568,6 +708,10 @@ export default function App() {
           onConfigChange={setConfig}
           calcTimeMs={calcTimeMs}
           onManualRefresh={runCalculation}
+          onOpenReportPreview={() => {
+            setIsSettingsOpen(false);
+            setIsReportOpen(true);
+          }}
           isCalculating={loading}
           appVersion={appVersion}
           updateInfo={updateInfo}
@@ -592,6 +736,7 @@ export default function App() {
           <ReportModal
             isOpen={isReportOpen}
             onClose={() => setIsReportOpen(false)}
+            onOpenReportEditor={() => handleOpenSettings("report")}
             plan={plan}
             meta={meta}
             onMetaChange={setMeta}

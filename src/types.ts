@@ -69,8 +69,50 @@ export interface AnglePreset {
 }
 
 export type CalcMode = 'instant' | 'timer' | 'manual';
+export type AppTheme = 'light' | 'dark';
+export type BarDensity = 'compact' | 'normal' | 'tall';
+
+export interface ReportDisplaySettings {
+  defaultTitle: string;
+  showLogoAndCompany: boolean;
+  showMaterialAndMachine: boolean;
+  showOrderParams: boolean;
+  showSummaryTable: boolean;
+  showCutDiagrams: boolean;
+  showPartLabelsOnDiagram: boolean;
+  showAnglesOnDiagram: boolean;
+  showCutSequence: boolean;
+  diagramBarHeight: BarDensity;
+  compactCards: boolean;
+  showNotes: boolean;
+  notesText: string;
+  showSignatures: boolean;
+  leftSignatureTitle: string;
+  rightSignatureTitle: string;
+}
+
+export const DEFAULT_REPORT_CONFIG: ReportDisplaySettings = {
+  defaultTitle: 'Технологическая карта раскроя',
+  showLogoAndCompany: true,
+  showMaterialAndMachine: true,
+  showOrderParams: true,
+  showSummaryTable: true,
+  showCutDiagrams: true,
+  showPartLabelsOnDiagram: true,
+  showAnglesOnDiagram: true,
+  showCutSequence: true,
+  diagramBarHeight: 'normal',
+  compactCards: false,
+  showNotes: false,
+  notesText: '',
+  showSignatures: true,
+  leftSignatureTitle: 'Раскрой выполнил',
+  rightSignatureTitle: 'Склад / Контроль ОТК',
+};
 
 export interface AppSettings {
+  theme: AppTheme;
+  barDensity: BarDensity;
   calcMode: CalcMode;
   timerSeconds: number;
   autoRecalcOnFocus: boolean;
@@ -82,6 +124,7 @@ export interface AppSettings {
   companyWebsite: string;
   machineName: string;
   operatorName: string;
+  reportConfig?: ReportDisplaySettings;
 }
 
 export interface UpdateCheckResult {

@@ -1,6 +1,6 @@
 [package]
 name = "raskroy-pro"
-version = "0.3.0"
+version = "0.4.0"
 description = "Раскрой Про — оптимизация линейного раскроя профилей (АО Мобиль)"
 authors = ["АО Мобиль"]
 edition = "2024"

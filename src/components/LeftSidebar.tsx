@@ -1,5 +1,5 @@
 import React from "react";
-import { AppSettings } from "../types";
+import { AppSettings, AppTheme } from "../types";
 import { MobilLogo } from "./MobilLogo";
 import { SettingsTabType } from "./SettingsDrawer";
 import {
@@ -15,12 +15,16 @@ import {
   Layers,
   RotateCcw,
   ArrowUpCircle,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 interface LeftSidebarProps {
   isOpen: boolean;
+  widthPx?: number;
   onClose: () => void;
   settings: AppSettings;
+  onToggleTheme: (theme: AppTheme) => void;
   appVersion: string;
   updateAvailableVersion?: string | null;
   isDirty: boolean;
@@ -40,8 +44,10 @@ interface LeftSidebarProps {
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isOpen,
+  widthPx = 236,
   onClose,
   settings,
+  onToggleTheme,
   appVersion,
   updateAvailableVersion,
   isDirty,
@@ -73,7 +79,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       ? "bg-sky-400"
       : isDirty
       ? "bg-amber-400"
-      : "bg-[#6b7280]";
+      : "bg-slate-400";
 
   const statusText =
     settings.calcMode === "instant"
@@ -85,35 +91,38 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
       : `Обновлено${calcTimeMs !== null ? ` • ${calcTimeMs} мс` : ""}`;
 
   const itemClass =
-    "w-full h-8 px-2 rounded flex items-center justify-between text-xs text-[#9ea3ae] hover:text-[#ededed] hover:bg-white/[0.04] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+    "w-full h-8 px-2 rounded flex items-center justify-between text-xs text-[var(--sidebar-muted)] hover:text-[var(--sidebar-text)] hover:bg-[var(--sidebar-hover)] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (
-    <aside className="w-60 shrink-0 bg-[#151518] border-r border-white/[0.08] flex flex-col select-none no-print sticky top-0 h-screen">
+    <aside
+      style={{ width: widthPx }}
+      className="shrink-0 bg-[var(--sidebar-bg)] border-r border-[var(--sidebar-border)] flex flex-col select-none no-print h-full"
+    >
       {/* Brand + Collapse Control */}
-      <div className="h-12 px-4 border-b border-white/[0.06] flex items-center justify-between">
+      <div className="h-12 px-4 border-b border-[var(--sidebar-border)] flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <MobilLogo height={16} showWordmark={true} accentColor="#dd4b19" color="#ededed" />
-          <span className="text-[10px] text-[#6b7280] font-mono">v{appVersion}</span>
+          <MobilLogo height={16} showWordmark={true} accentColor="#dd4b19" color="#f1f5f9" />
+          <span className="text-[10px] text-[var(--sidebar-muted)] font-mono">v{appVersion}</span>
         </div>
 
         <button
           onClick={onClose}
-          className="p-1.5 text-[#9ea3ae] hover:text-[#ededed] hover:bg-white/[0.05] rounded transition-colors cursor-pointer"
-          title="Скрыть левую панель"
+          className="p-1.5 text-[var(--sidebar-muted)] hover:text-[var(--sidebar-text)] hover:bg-[var(--sidebar-hover)] rounded transition-colors cursor-pointer"
+          title="Скрыть левую панель (Ctrl+B)"
         >
           <PanelLeftClose className="w-4 h-4 stroke-[1.5]" />
         </button>
       </div>
 
       {/* Primary Refresh Action + Status */}
-      <div className="p-3 border-b border-white/[0.06] space-y-2">
+      <div className="p-3 border-b border-[var(--sidebar-border)] space-y-2">
         <button
           onClick={onCalculate}
           disabled={loading}
           className={`w-full h-9 px-3 rounded flex items-center justify-between text-xs font-medium transition-colors cursor-pointer disabled:opacity-50 ${
             isDirty && settings.calcMode !== "instant"
               ? "bg-[#dd4b19] hover:bg-[#c53f12] text-white"
-              : "bg-[#202024] hover:bg-[#28282e] text-[#ededed] border border-white/[0.08]"
+              : "bg-white/[0.08] hover:bg-white/[0.13] text-[#f1f5f9] border border-white/[0.1]"
           }`}
           title="Выполнить перерасчет раскроя (Ctrl+Enter)"
         >
@@ -125,12 +134,12 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             />
             <span>{loading ? "Расчёт..." : "Обновить"}</span>
           </span>
-          <kbd className="text-[10px] font-mono opacity-65 px-1 rounded bg-black/20">
+          <kbd className="text-[10px] font-mono opacity-70 px-1 rounded bg-black/25">
             Ctrl+↵
           </kbd>
         </button>
 
-        <div className="flex items-center gap-2 px-1 text-[11px] text-[#9ea3ae] font-mono">
+        <div className="flex items-center gap-2 px-1 text-[11px] text-[var(--sidebar-muted)] font-mono">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
           <span className="truncate">{statusText}</span>
         </div>
@@ -138,53 +147,60 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
       {/* Navigation Sections */}
       <nav className="flex-1 overflow-y-auto px-3 py-2">
-        <div className="mt-2 mb-1.5 px-2 text-[11px] font-medium text-[#6b7280]">
+        <div className="mt-2 mb-1.5 px-2 text-[11px] font-medium text-slate-400">
           Настройки и режим
         </div>
 
         <div className="space-y-0.5">
           <button onClick={() => onOpenSettings("cutting")} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Sliders className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Настройки станка</span>
+              <span className="truncate">Настройки станка</span>
             </span>
           </button>
 
           <button onClick={() => onOpenSettings("refresh")} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Clock className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Таймер расчёта</span>
+              <span className="truncate">Таймер расчёта</span>
             </span>
-            <span className="text-[10px] font-mono text-[#6b7280] bg-[#1d1d21] px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-mono text-slate-300 bg-white/[0.07] px-1.5 py-0.5 rounded">
               {modeBadge}
             </span>
           </button>
 
           <button onClick={() => onOpenSettings("angles")} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Compass className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Шаблоны углов</span>
+              <span className="truncate">Шаблоны углов</span>
             </span>
-            <span className="text-[10px] font-mono text-[#6b7280]">
+            <span className="text-[10px] font-mono text-slate-400">
               {settings.anglePresets.length}
             </span>
           </button>
 
+          <button onClick={() => onOpenSettings("report")} className={itemClass}>
+            <span className="flex items-center gap-2.5 truncate">
+              <FileText className="w-4 h-4 stroke-[1.5] shrink-0" />
+              <span className="truncate">Редактор отчёта</span>
+            </span>
+          </button>
+
           <button onClick={() => onOpenSettings("branding")} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Building2 className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Брендинг и цех</span>
+              <span className="truncate">Брендинг и цех</span>
             </span>
           </button>
 
           <button onClick={() => onOpenSettings("update")} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <ArrowUpCircle
                 className={`w-4 h-4 stroke-[1.5] shrink-0 ${
                   updateAvailableVersion ? "text-[#dd4b19]" : ""
                 }`}
               />
-              <span className={updateAvailableVersion ? "text-[#ededed] font-medium" : ""}>
+              <span className={`truncate ${updateAvailableVersion ? "text-white font-medium" : ""}`}>
                 Обновление ПО
               </span>
             </span>
@@ -193,57 +209,86 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 v{updateAvailableVersion}
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-[#6b7280]">GitHub</span>
+              <span className="text-[10px] font-mono text-slate-400">GitHub</span>
             )}
           </button>
         </div>
 
-        <div className="mt-6 mb-1.5 px-2 text-[11px] font-medium text-[#6b7280]">
+        <div className="mt-6 mb-1.5 px-2 text-[11px] font-medium text-slate-400">
           Документ и данные
         </div>
 
         <div className="space-y-0.5">
           <button onClick={onOpenReport} disabled={!hasPlan} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <FileText className="w-4 h-4 stroke-[1.5] shrink-0 text-[#dd4b19]" />
-              <span className="text-[#ededed]">Печать / Наряд А4</span>
+              <span className="text-[#f1f5f9] truncate">Печать / Наряд А4</span>
             </span>
           </button>
 
           <button onClick={onOpenImport} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <FileSpreadsheet className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Импорт из Excel</span>
+              <span className="truncate">Импорт из Excel</span>
             </span>
           </button>
 
           <button onClick={onDownloadSample} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Download className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Шаблон Excel</span>
+              <span className="truncate">Шаблон Excel</span>
             </span>
           </button>
 
           <button onClick={onLoadExample} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <Layers className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Пример из Excel</span>
+              <span className="truncate">Пример из Excel</span>
             </span>
           </button>
 
           <button onClick={onClearAll} className={itemClass}>
-            <span className="flex items-center gap-2.5">
+            <span className="flex items-center gap-2.5 truncate">
               <RotateCcw className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span>Сбросить таблицы</span>
+              <span className="truncate">Сбросить таблицы</span>
             </span>
           </button>
         </div>
       </nav>
 
-      {/* Bottom Info Footer */}
-      <div className="p-3 border-t border-white/[0.06] text-[11px] text-[#6b7280] space-y-1">
-        <div className="text-[#9ea3ae] font-medium truncate">{settings.companyName}</div>
-        <div className="truncate font-mono text-[10px]">{settings.machineName}</div>
+      {/* Bottom Theme Toggle + Info Footer */}
+      <div className="p-3 border-t border-[var(--sidebar-border)] space-y-2.5">
+        <div className="flex items-center bg-white/[0.06] rounded p-0.5 border border-white/[0.08] text-[11px]">
+          <button
+            type="button"
+            onClick={() => onToggleTheme("light")}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded transition-colors cursor-pointer ${
+              settings.theme === "light"
+                ? "bg-[#f8fafc] text-[#0f172a] font-medium"
+                : "text-slate-300 hover:text-white"
+            }`}
+          >
+            <Sun className="w-3.5 h-3.5" />
+            <span>Светлая</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleTheme("dark")}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded transition-colors cursor-pointer ${
+              settings.theme === "dark"
+                ? "bg-[#282d37] text-white font-medium"
+                : "text-slate-300 hover:text-white"
+            }`}
+          >
+            <Moon className="w-3.5 h-3.5" />
+            <span>Тёмная</span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-slate-400 space-y-0.5 px-0.5">
+          <div className="text-slate-200 font-medium truncate">{settings.companyName}</div>
+          <div className="truncate font-mono text-[10px]">{settings.machineName}</div>
+        </div>
       </div>
     </aside>
   );

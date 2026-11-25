@@ -155,7 +155,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <button onClick={() => onOpenSettings("cutting")} className={itemClass}>
             <span className="flex items-center gap-2.5 truncate">
               <Sliders className="w-4 h-4 stroke-[1.5] shrink-0" />
-              <span className="truncate">Настройки станка</span>
+              <span className="truncate">Алгоритм и станок</span>
             </span>
           </button>
 

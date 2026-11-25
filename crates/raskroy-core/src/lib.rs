@@ -1,3 +1,5 @@
+mod advanced;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -44,6 +46,21 @@ impl Part {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CuttingAlgorithm {
+    #[default]
+    Auto,
+    ColumnGeneration,
+    BranchAndBound,
+    KnapsackDp,
+    KnapsackTolerance,
+    BestFit,
+    FirstFit,
+    SimulatedAnnealing,
+    MinPatterns,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CutConfig {
     pub cut_width: u32,      // Kerf (ширина пропила пилы, мм)
@@ -51,6 +68,8 @@ pub struct CutConfig {
     pub trim_right: u32,     // Торцовка задней кромки (мм)
     pub min_remnant: u32,    // Порог делового остатка (мм)
     pub two_profiles: bool,  // Раскрой в 2 профиля (спаренный рез)
+    #[serde(default)]
+    pub algorithm: CuttingAlgorithm, // Выбранный алгоритм расчёта
 }
 
 impl Default for CutConfig {
@@ -61,6 +80,7 @@ impl Default for CutConfig {
             trim_right: 0,
             min_remnant: 1000,
             two_profiles: false,
+            algorithm: CuttingAlgorithm::Auto,
         }
     }
 }
@@ -148,42 +168,113 @@ pub fn calculate_cutting(
         (parts.to_vec(), 1u32)
     };
 
-    // Run solvers and select the best plan
+    // Run selected strategy or multi-strategy optimization
     let mut candidates = Vec::new();
 
-    // Strategy 1: Knapsack DP greedy packing
-    if let Ok(plan) = solve_knapsack_dp(stocks, &scaled_parts, parts, config, multiplier) {
-        candidates.push(plan);
-    }
-
-    // Strategy 2: Best Fit Decreasing
-    if let Ok(plan) = solve_bfd(stocks, &scaled_parts, parts, config, multiplier) {
-        candidates.push(plan);
-    }
-
-    // Strategy 3: Knapsack DP with waste tolerance variation
-    if let Ok(plan) = solve_knapsack_dp_with_tolerance(stocks, &scaled_parts, parts, config, multiplier) {
-        candidates.push(plan);
+    match config.algorithm {
+        CuttingAlgorithm::ColumnGeneration => {
+            if let Ok(plan) =
+                advanced::solve_column_generation(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::BranchAndBound => {
+            if let Ok(plan) =
+                advanced::solve_branch_and_bound(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::KnapsackDp => {
+            if let Ok(plan) = solve_knapsack_dp(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::KnapsackTolerance => {
+            if let Ok(plan) =
+                solve_knapsack_dp_with_tolerance(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::BestFit => {
+            if let Ok(plan) = solve_bfd(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::FirstFit => {
+            if let Ok(plan) = solve_ffd(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::SimulatedAnnealing => {
+            if let Ok(plan) =
+                advanced::solve_simulated_annealing(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+        }
+        CuttingAlgorithm::Auto | CuttingAlgorithm::MinPatterns => {
+            if let Ok(plan) = solve_knapsack_dp(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+            if let Ok(plan) = solve_bfd(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+            if let Ok(plan) = solve_ffd(stocks, &scaled_parts, parts, config, multiplier) {
+                candidates.push(plan);
+            }
+            if let Ok(plan) =
+                solve_knapsack_dp_with_tolerance(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+            if let Ok(plan) =
+                advanced::solve_column_generation(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+            if let Ok(plan) =
+                advanced::solve_simulated_annealing(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+            if let Ok(plan) =
+                advanced::solve_branch_and_bound(stocks, &scaled_parts, parts, config, multiplier)
+            {
+                candidates.push(plan);
+            }
+        }
     }
 
     if candidates.is_empty() {
         return Err("Не удалось построить план раскроя".to_string());
     }
 
-    // Score plans:
-    // 1. Min unplaced count
-    // 2. Min total stocks used
-    // 3. Min total waste
-    // 4. Min number of patterns (fewer pattern changes)
-    candidates.sort_by(|a, b| {
-        let unplaced_a: u32 = a.unplaced.iter().map(|p| p.quantity).sum();
-        let unplaced_b: u32 = b.unplaced.iter().map(|p| p.quantity).sum();
-        unplaced_a
-            .cmp(&unplaced_b)
-            .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
-            .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
-            .then_with(|| a.patterns.len().cmp(&b.patterns.len()))
-    });
+    if config.algorithm == CuttingAlgorithm::MinPatterns {
+        // Prioritize minimal setup changes (fewest distinct patterns) among complete plans
+        candidates.sort_by(|a, b| {
+            let unplaced_a: u32 = a.unplaced.iter().map(|p| p.quantity).sum();
+            let unplaced_b: u32 = b.unplaced.iter().map(|p| p.quantity).sum();
+            unplaced_a
+                .cmp(&unplaced_b)
+                .then_with(|| a.patterns.len().cmp(&b.patterns.len()))
+                .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
+        });
+    } else {
+        // Default score: min unplaced -> min total stocks -> min total waste -> fewest pattern types
+        candidates.sort_by(|a, b| {
+            let unplaced_a: u32 = a.unplaced.iter().map(|p| p.quantity).sum();
+            let unplaced_b: u32 = b.unplaced.iter().map(|p| p.quantity).sum();
+            unplaced_a
+                .cmp(&unplaced_b)
+                .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
+                .then_with(|| a.patterns.len().cmp(&b.patterns.len()))
+        });
+    }
 
     Ok(candidates.remove(0))
 }
@@ -312,13 +403,41 @@ fn solve_knapsack_internal(
     })
 }
 
-/// Strategy 2: Best Fit Decreasing
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GreedyMode {
+    BestFit,
+    FirstFit,
+}
+
+/// Strategy 2: Best Fit Decreasing (tightest remaining bin)
 fn solve_bfd(
     stocks: &[Stock],
     scaled_parts: &[Part],
     original_parts: &[Part],
     config: &CutConfig,
     multiplier: u32,
+) -> Result<CuttingPlan, String> {
+    solve_greedy_fit(stocks, scaled_parts, original_parts, config, multiplier, GreedyMode::BestFit)
+}
+
+/// Strategy 4: First Fit Decreasing (first open bin that fits)
+fn solve_ffd(
+    stocks: &[Stock],
+    scaled_parts: &[Part],
+    original_parts: &[Part],
+    config: &CutConfig,
+    multiplier: u32,
+) -> Result<CuttingPlan, String> {
+    solve_greedy_fit(stocks, scaled_parts, original_parts, config, multiplier, GreedyMode::FirstFit)
+}
+
+fn solve_greedy_fit(
+    stocks: &[Stock],
+    scaled_parts: &[Part],
+    original_parts: &[Part],
+    config: &CutConfig,
+    multiplier: u32,
+    mode: GreedyMode,
 ) -> Result<CuttingPlan, String> {
     let mut available_stocks: Vec<Stock> = stocks.to_vec();
     available_stocks.sort_by(|a, b| b.length.cmp(&a.length));
@@ -337,17 +456,24 @@ fn solve_bfd(
     'item_loop: for item in remaining_items.into_iter() {
         let needed = item.length + config.cut_width;
 
-        let mut best_bar_idx = None;
-        let mut min_rem = u32::MAX;
-
-        for (idx, bar) in open_bars.iter().enumerate() {
-            if bar.remaining_space >= needed && bar.remaining_space < min_rem {
-                min_rem = bar.remaining_space;
-                best_bar_idx = Some(idx);
+        let chosen_bar_idx = match mode {
+            GreedyMode::BestFit => {
+                let mut best_bar_idx = None;
+                let mut min_rem = u32::MAX;
+                for (idx, bar) in open_bars.iter().enumerate() {
+                    if bar.remaining_space >= needed && bar.remaining_space < min_rem {
+                        min_rem = bar.remaining_space;
+                        best_bar_idx = Some(idx);
+                    }
+                }
+                best_bar_idx
             }
-        }
+            GreedyMode::FirstFit => open_bars
+                .iter()
+                .position(|bar| bar.remaining_space >= needed),
+        };
 
-        if let Some(idx) = best_bar_idx {
+        if let Some(idx) = chosen_bar_idx {
             let bar = &mut open_bars[idx];
             bar.remaining_space -= needed;
             bar.items.push(item);
@@ -648,6 +774,7 @@ mod tests {
             trim_right: 0,
             min_remnant: 1000,
             two_profiles: false,
+            algorithm: CuttingAlgorithm::Auto,
         };
 
         let start = std::time::Instant::now();
@@ -673,6 +800,7 @@ mod tests {
             trim_right: 0,
             min_remnant: 500,
             two_profiles: false,
+            algorithm: CuttingAlgorithm::Auto,
         };
 
         let plan = calculate_cutting(&stocks, &parts, &config).expect("Calculation failed");
@@ -695,6 +823,7 @@ mod tests {
             trim_right: 0,
             min_remnant: 500,
             two_profiles: true,
+            algorithm: CuttingAlgorithm::Auto,
         };
 
         let plan = calculate_cutting(&stocks, &parts, &config).expect("Calculation failed");
@@ -714,6 +843,7 @@ mod tests {
             trim_right: 0,
             min_remnant: 100,
             two_profiles: false,
+            algorithm: CuttingAlgorithm::Auto,
         };
         let plan1 = calculate_cutting(&stocks, &parts, &config_no_trim).unwrap();
         assert_eq!(plan1.summary.total_parts_placed, 1);
@@ -724,9 +854,69 @@ mod tests {
             trim_right: 10,
             min_remnant: 100,
             two_profiles: false,
+            algorithm: CuttingAlgorithm::Auto,
         };
         let plan2 = calculate_cutting(&stocks, &parts, &config_with_trim).unwrap();
         assert_eq!(plan2.summary.total_parts_placed, 0);
         assert_eq!(plan2.unplaced.len(), 1);
+    }
+
+    #[test]
+    fn test_all_algorithm_modes() {
+        let stocks = vec![Stock::new(6100, None)];
+        let parts = vec![
+            Part::new(2700, 12),
+            Part::new(2400, 8),
+            Part::new(1875, 4),
+            Part::new(1625, 4),
+        ];
+
+        for algo in [
+            CuttingAlgorithm::Auto,
+            CuttingAlgorithm::ColumnGeneration,
+            CuttingAlgorithm::BranchAndBound,
+            CuttingAlgorithm::KnapsackDp,
+            CuttingAlgorithm::KnapsackTolerance,
+            CuttingAlgorithm::BestFit,
+            CuttingAlgorithm::FirstFit,
+            CuttingAlgorithm::SimulatedAnnealing,
+            CuttingAlgorithm::MinPatterns,
+        ] {
+            let cfg = CutConfig {
+                algorithm: algo,
+                ..CutConfig::default()
+            };
+            let plan = calculate_cutting(&stocks, &parts, &cfg).expect("Algo failed");
+            assert_eq!(plan.summary.total_parts_placed, 28);
+            assert!(plan.unplaced.is_empty());
+        }
+
+        // Verify benchmark case across Column Generation, B&B, and Simulated Annealing too
+        let bench_stocks = vec![Stock::new(6100, None)];
+        let bench_parts = vec![
+            Part::new(2700, 37),
+            Part::new(2400, 12),
+            Part::new(2067, 1),
+            Part::new(2260, 2),
+            Part::new(1875, 4),
+            Part::new(1625, 2),
+            Part::new(2595, 4),
+            Part::new(2500, 4),
+            Part::new(2200, 1),
+            Part::new(2950, 4),
+        ];
+        for algo in [
+            CuttingAlgorithm::ColumnGeneration,
+            CuttingAlgorithm::BranchAndBound,
+            CuttingAlgorithm::SimulatedAnnealing,
+        ] {
+            let cfg = CutConfig {
+                algorithm: algo,
+                ..CutConfig::default()
+            };
+            let plan = calculate_cutting(&bench_stocks, &bench_parts, &cfg).expect("Bench failed");
+            assert_eq!(plan.summary.total_parts_placed, 71);
+            assert!(plan.unplaced.is_empty());
+        }
     }
 }

@@ -7,6 +7,7 @@ import {
   DocumentMeta,
   AppSettings,
   AppTheme,
+  CuttingAlgorithm,
   DEFAULT_REPORT_CONFIG,
   UpdateCheckResult,
   UpdateProgressEvent,
@@ -60,6 +61,7 @@ const DEFAULT_CONFIG: CutConfig = {
   trim_right: 0,
   min_remnant: 1000,
   two_profiles: false,
+  algorithm: "auto",
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -82,7 +84,17 @@ const DEFAULT_SETTINGS: AppSettings = {
 export default function App() {
   const [stocks, setStocks] = useState<Stock[]>(EXCEL_EXAMPLE_STOCKS);
   const [parts, setParts] = useState<Part[]>(EXCEL_EXAMPLE_PARTS);
-  const [config, setConfig] = useState<CutConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<CutConfig>(() => {
+    try {
+      const savedAlgo = localStorage.getItem("raskroy_cut_algorithm") as CuttingAlgorithm | null;
+      if (savedAlgo) {
+        return { ...DEFAULT_CONFIG, algorithm: savedAlgo };
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return DEFAULT_CONFIG;
+  });
   const [plan, setPlan] = useState<CuttingPlan | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +162,7 @@ export default function App() {
   const [isReportOpen, setIsReportOpen] = useState(false);
 
   // App Version & GitHub Releases Auto-Updater state
-  const [appVersion, setAppVersion] = useState<string>("0.4.0");
+  const [appVersion, setAppVersion] = useState<string>("0.5.0");
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
@@ -167,6 +179,17 @@ export default function App() {
     date: new Date().toLocaleDateString("ru-RU"),
     orderNumber: "ЗК-104",
   });
+
+  // Persist selected cutting algorithm across app restarts
+  useEffect(() => {
+    try {
+      if (config.algorithm) {
+        localStorage.setItem("raskroy_cut_algorithm", config.algorithm);
+      }
+    } catch {
+      // ignore
+    }
+  }, [config.algorithm]);
 
   // Sync theme attribute on root <html>
   useEffect(() => {
@@ -669,6 +692,8 @@ export default function App() {
                       }
                       trimLeft={config.trim_left}
                       trimRight={config.trim_right}
+                      activeAlgorithm={config.algorithm || "auto"}
+                      onOpenAlgorithmSettings={() => handleOpenSettings("cutting")}
                     />
                   </>
                 )}

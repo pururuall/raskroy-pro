@@ -7,6 +7,7 @@ import {
   UpdateProgressEvent,
   DEFAULT_REPORT_CONFIG,
   ReportDisplaySettings,
+  CUTTING_ALGORITHMS,
 } from "../types";
 import { MobilLogo } from "./MobilLogo";
 import { DEFAULT_ANGLE_PRESETS } from "./PartsTable";
@@ -100,6 +101,10 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
       [key]: value,
     });
   };
+
+  const activeAlgorithm = config.algorithm || "auto";
+  const activeAlgorithmMeta =
+    CUTTING_ALGORITHMS.find((a) => a.id === activeAlgorithm) || CUTTING_ALGORITHMS[0];
 
   const reportCfg: ReportDisplaySettings = {
     ...DEFAULT_REPORT_CONFIG,
@@ -217,8 +222,8 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              <Sliders className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Станок</span>
+              <Cpu className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Алгоритм</span>
             </button>
 
             <button
@@ -392,14 +397,19 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
                 {/* Diagnostics block */}
                 <div className="p-3.5 bg-[var(--bg-subtle)] border border-[var(--border-main)] rounded-lg space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center justify-between text-[11px] gap-2">
                     <div className="flex items-center gap-1.5 text-[var(--text-secondary)]">
                       <Cpu className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Вычислительное ядро:</span>
+                      <span>Алгоритм раскроя:</span>
                     </div>
-                    <span className="font-mono text-[var(--text-primary)]">
-                      Rust Core (DP Knapsack)
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("cutting")}
+                      className="font-mono text-[var(--text-primary)] hover:text-[#dd4b19] underline decoration-dotted cursor-pointer truncate"
+                      title="Перейти к выбору алгоритма расчёта"
+                    >
+                      {activeAlgorithmMeta.name}
+                    </button>
                   </div>
 
                   <div className="flex items-center justify-between text-[11px]">
@@ -537,17 +547,86 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               </div>
             )}
 
-            {/* TAB 3: CUTTING TECH & MACHINE */}
+            {/* TAB 3: CUTTING TECH, ALGORITHM & MACHINE */}
             {activeTab === "cutting" && (
-              <div className="space-y-4">
+              <div className="space-y-5">
+                {/* Algorithm Selector + Explanations */}
                 <div>
-                  <h4 className="font-semibold text-[var(--text-primary)] mb-1">
-                    Параметры станка и пропила
-                  </h4>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Cpu className="w-4 h-4 text-[#dd4b19]" />
+                    <h4 className="font-semibold text-[var(--text-primary)]">
+                      Алгоритм расчёта линейного раскроя
+                    </h4>
+                  </div>
                   <p className="text-[11px] text-[var(--text-secondary)] mb-3">
-                    Точность раскроя с учетом ширины пильного диска и технологических кромок
+                    Выберите стратегию оптимизации карт распила. При смене режима план пересчитывается сразу.
                   </p>
+
+                  <div className="space-y-2">
+                    {CUTTING_ALGORITHMS.map((algo) => {
+                      const isSelected = activeAlgorithm === algo.id;
+                      return (
+                        <label
+                          key={algo.id}
+                          className={`block p-3 rounded-lg border transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-[var(--bg-hover)] border-[#dd4b19]"
+                              : "bg-[var(--bg-subtle)] border-[var(--border-main)] hover:border-[#dd4b19]/40"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <input
+                              type="radio"
+                              name="cuttingAlgorithm"
+                              checked={isSelected}
+                              onChange={() => updateConfig("algorithm", algo.id)}
+                              className="mt-1 accent-[#dd4b19]"
+                            />
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <span className="font-semibold text-[var(--text-primary)]">
+                                  {algo.name}
+                                </span>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                                    isSelected
+                                      ? "bg-[#dd4b19] text-white"
+                                      : "bg-[var(--bg-muted)] text-[var(--text-secondary)]"
+                                  }`}
+                                >
+                                  {algo.badge}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[var(--text-secondary)] leading-snug">
+                                {algo.summary}
+                              </p>
+                              <div className="pt-1 text-[10.5px] text-[var(--text-muted)] leading-relaxed border-t border-[var(--border-subtle)] space-y-0.5">
+                                <div>
+                                  <strong className="text-[var(--text-secondary)]">Как считает:</strong>{" "}
+                                  {algo.howItWorks}
+                                </div>
+                                <div>
+                                  <strong className="text-[var(--text-secondary)]">Когда выбирать:</strong>{" "}
+                                  {algo.bestFor}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                <div className="border-t border-[var(--border-main)] pt-4 space-y-4">
+                  <div>
+                    <h4 className="font-semibold text-[var(--text-primary)] mb-1">
+                      Параметры станка и пропила
+                    </h4>
+                    <p className="text-[11px] text-[var(--text-secondary)]">
+                      Точность раскроя с учетом ширины пильного диска и технологических кромок
+                    </p>
+                  </div>
 
                 <div>
                   <label className="text-[11px] text-[var(--text-secondary)] block mb-1">
@@ -642,6 +721,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                     placeholder="Например: Двухголовочная пила"
                     className="w-full bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-3 py-1.5 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[#dd4b19]"
                   />
+                </div>
                 </div>
               </div>
             )}

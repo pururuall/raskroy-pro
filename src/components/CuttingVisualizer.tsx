@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect } from "react";
-import { BarDensity, CuttingPattern } from "../types";
-import { Printer, Copy, Check, Eye } from "lucide-react";
+import {
+  BarDensity,
+  CUTTING_ALGORITHMS,
+  CuttingAlgorithm,
+  CuttingPattern,
+} from "../types";
+import { Printer, Copy, Check, Eye, Cpu } from "lucide-react";
 import { ResizeHandle } from "./ResizeHandle";
 
 interface CuttingVisualizerProps {
@@ -12,6 +17,8 @@ interface CuttingVisualizerProps {
   onBarDensityChange?: (density: BarDensity) => void;
   trimLeft?: number;
   trimRight?: number;
+  activeAlgorithm?: CuttingAlgorithm;
+  onOpenAlgorithmSettings?: () => void;
 }
 
 interface SegmentPalette {
@@ -413,7 +420,11 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
   onBarDensityChange,
   trimLeft = 0,
   trimRight = 0,
+  activeAlgorithm = "auto",
+  onOpenAlgorithmSettings,
 }) => {
+  const activeAlgoInfo =
+    CUTTING_ALGORITHMS.find((a) => a.id === activeAlgorithm) || CUTTING_ALGORITHMS[0];
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [showAnglesOnBar, setShowAnglesOnBar] = useState<boolean>(true);
   const [listMaxHeight, setListMaxHeight] = useState<number>(620);
@@ -456,9 +467,22 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
     <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] rounded-lg overflow-hidden flex flex-col">
       <div className="p-3.5 pb-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h3 className="text-xs font-semibold text-[var(--text-primary)]">
-            Карты раскроя ({patterns.length} типов)
-          </h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-[var(--text-primary)]">
+              Карты раскроя ({patterns.length} типов)
+            </h3>
+            {onOpenAlgorithmSettings && (
+              <button
+                type="button"
+                onClick={onOpenAlgorithmSettings}
+                className="inline-flex items-center gap-1 text-[10.5px] font-medium px-2 py-0.5 rounded bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[#dd4b19] border border-[var(--border-main)] transition-colors cursor-pointer"
+                title={activeAlgoInfo.howItWorks}
+              >
+                <Cpu className="w-3 h-3 text-[#dd4b19]" />
+                <span>{activeAlgoInfo.name}</span>
+              </button>
+            )}
+          </div>
           <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
             Векторная геометрия срезов: жёлтый срез — угол пл. 1, пунктир — наклон пл. 2
           </p>

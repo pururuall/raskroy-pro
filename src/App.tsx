@@ -4,10 +4,13 @@ import {
   Part,
   CutConfig,
   CuttingPlan,
-  DocumentMeta,
   AppSettings,
   AppTheme,
+  APP_THEMES,
   CuttingAlgorithm,
+  StockPriorityMode,
+  CuttingTab,
+  DEFAULT_IMPORT_OPTIONS,
   DEFAULT_REPORT_CONFIG,
   UpdateCheckResult,
   UpdateProgressEvent,
@@ -22,24 +25,17 @@ import { PrintReport } from "./components/PrintReport";
 import { SettingsDrawer, SettingsTabType } from "./components/SettingsDrawer";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { ImportExcelModal } from "./components/ImportExcelModal";
-import { MobilLogo } from "./components/MobilLogo";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { TitleBar } from "./components/TitleBar";
-import { downloadSampleExcel } from "./utils/excelImport";
+import { WelcomeScreen } from "./components/WelcomeScreen";
+import { TabsBar } from "./components/TabsBar";
+import { downloadSampleExcel, ImportGroup, parseExcelFile } from "./utils/excelImport";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import {
-  AlertCircle,
-  FileText,
-  Sliders,
-  RefreshCw,
-  PanelLeft,
-  Sun,
-  Moon,
-} from "lucide-react";
+import { AlertCircle, FileText, RefreshCw, Info, X } from "lucide-react";
 
-// Benchmark dataset from "таблица раскроя.xlsm"
+// Benchmark dataset from "таблица раскроя.xlsm" (accessible from Settings -> Import -> Demo)
 const EXCEL_EXAMPLE_STOCKS: Stock[] = [{ length: 6100, quantity: undefined }];
 
 const EXCEL_EXAMPLE_PARTS: Part[] = [
@@ -62,6 +58,7 @@ const DEFAULT_CONFIG: CutConfig = {
   min_remnant: 1000,
   two_profiles: false,
   algorithm: "auto",
+  stock_priority: "min_total_length",
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -71,6 +68,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   timerSeconds: 10,
   autoRecalcOnFocus: true,
   autoCheckUpdates: true,
+  defaultStockLength: 6000,
+  sidebarPinned: false,
+  importOptions: DEFAULT_IMPORT_OPTIONS,
   anglePresets: DEFAULT_ANGLE_PRESETS,
   companyName: "АО «Мобиль»",
   companyLogo: "mobil",
@@ -81,66 +81,96 @@ const DEFAULT_SETTINGS: AppSettings = {
   reportConfig: DEFAULT_REPORT_CONFIG,
 };
 
+function makeTabId(): string {
+  return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function getSavedAlgorithm(): CuttingAlgorithm {
+  try {
+    const saved = localStorage.getItem("raskroy_cut_algorithm") as CuttingAlgorithm | null;
+    if (saved) return saved;
+  } catch {
+    // ignore
+  }
+  return "auto";
+}
+
+function getSavedStockPriority(): StockPriorityMode {
+  try {
+    const saved = localStorage.getItem("raskroy_stock_priority") as StockPriorityMode | null;
+    if (saved === "min_total_length" || saved === "remnants_first" || saved === "min_bars_count") {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return "min_total_length";
+}
+
+function makeDefaultTabConfig(): CutConfig {
+  return {
+    ...DEFAULT_CONFIG,
+    algorithm: getSavedAlgorithm(),
+    stock_priority: getSavedStockPriority(),
+  };
+}
+
+function loadInitialSettings(): AppSettings {
+  try {
+    const saved = localStorage.getItem("raskroy_settings");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      const validTheme = APP_THEMES.some((t) => t.id === parsed?.theme)
+        ? (parsed.theme as AppTheme)
+        : "light";
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        theme: validTheme,
+        defaultStockLength:
+          typeof parsed?.defaultStockLength === "number" && parsed.defaultStockLength >= 100
+            ? parsed.defaultStockLength
+            : 6000,
+        sidebarPinned: Boolean(parsed?.sidebarPinned),
+        importOptions: {
+          ...DEFAULT_IMPORT_OPTIONS,
+          ...(parsed?.importOptions || {}),
+        },
+        reportConfig: {
+          ...DEFAULT_REPORT_CONFIG,
+          ...(parsed?.reportConfig || {}),
+        },
+      };
+    }
+  } catch (e) {
+    console.warn("Failed to load settings from storage", e);
+  }
+  return DEFAULT_SETTINGS;
+}
+
 export default function App() {
-  const [stocks, setStocks] = useState<Stock[]>(EXCEL_EXAMPLE_STOCKS);
-  const [parts, setParts] = useState<Part[]>(EXCEL_EXAMPLE_PARTS);
-  const [config, setConfig] = useState<CutConfig>(() => {
-    try {
-      const savedAlgo = localStorage.getItem("raskroy_cut_algorithm") as CuttingAlgorithm | null;
-      if (savedAlgo) {
-        return { ...DEFAULT_CONFIG, algorithm: savedAlgo };
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return DEFAULT_CONFIG;
-  });
-  const [plan, setPlan] = useState<CuttingPlan | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<AppSettings>(loadInitialSettings);
+
+  // App opens to empty Welcome Screen (tabs = [], activeTabId = null)
+  const [tabs, setTabs] = useState<CuttingTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const manualCounterRef = useRef<number>(1);
+
   const [hoveredLength, setHoveredLength] = useState<number | null>(null);
-  const [calcTimeMs, setCalcTimeMs] = useState<number | null>(null);
-  const [lastCalculatedAt, setLastCalculatedAt] = useState<string | null>(null);
-  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [welcomeLoading, setWelcomeLoading] = useState(false);
+  const [welcomeError, setWelcomeError] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
 
-  // Settings
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    try {
-      const saved = localStorage.getItem("raskroy_settings");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          reportConfig: {
-            ...DEFAULT_REPORT_CONFIG,
-            ...(parsed?.reportConfig || {}),
-          },
-        };
-      }
-    } catch (e) {
-      console.warn("Failed to load settings from storage", e);
-    }
-    return DEFAULT_SETTINGS;
-  });
-
-  // Left sidebar & resizable split layout state
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem("raskroy_sidebar_open");
-      return saved === null ? true : saved === "true";
-    } catch {
-      return true;
-    }
-  });
+  // Sidebar is hidden by default unless user pinned it permanently
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => settings.sidebarPinned);
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
       const saved = localStorage.getItem("raskroy_sidebar_width");
-      const val = saved ? parseInt(saved, 10) : 236;
-      return isNaN(val) ? 236 : Math.max(190, Math.min(340, val));
+      const val = saved ? parseInt(saved, 10) : 228;
+      return isNaN(val) ? 228 : Math.max(190, Math.min(340, val));
     } catch {
-      return 236;
+      return 228;
     }
   });
 
@@ -157,51 +187,59 @@ export default function App() {
   const splitContainerRef = useRef<HTMLDivElement>(null);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTabType>("refresh");
+  const [settingsTab, setSettingsTab] = useState<SettingsTabType>("algorithms");
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isReportOpen, setIsReportOpen] = useState(false);
+  const [reportScope, setReportScope] = useState<"active" | "all">("active");
 
   // App Version & GitHub Releases Auto-Updater state
-  const [appVersion, setAppVersion] = useState<string>("0.5.0");
+  const [appVersion, setAppVersion] = useState<string>("0.6.0");
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgressEvent | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
 
-  // Timer countdown state (for 'timer' mode)
   const [timerSecondsLeft, setTimerSecondsLeft] = useState<number>(settings.timerSeconds);
 
-  // Document and Material metadata
-  const [meta, setMeta] = useState<DocumentMeta>({
-    title: "Наряд на раскрой № 1",
-    material: "Профиль алюминиевый фасадный (АО «Мобиль»)",
-    date: new Date().toLocaleDateString("ru-RU"),
-    orderNumber: "ЗК-104",
-  });
+  const activeTab = tabs.find((t) => t.id === activeTabId) || null;
+  const isWelcomeScreen = activeTab === null;
+  const printableTabs = tabs.filter((t) => Boolean(t.plan));
 
-  // Persist selected cutting algorithm across app restarts
-  useEffect(() => {
-    try {
-      if (config.algorithm) {
-        localStorage.setItem("raskroy_cut_algorithm", config.algorithm);
-      }
-    } catch {
-      // ignore
-    }
-  }, [config.algorithm]);
+  // Keep a ref of latest tabs so timer/async callbacks read current data cleanly
+  const tabsRef = useRef<CuttingTab[]>(tabs);
+  tabsRef.current = tabs;
+
+  // Persist default global algorithm & stock priority selection
+  const fallbackConfig: CutConfig = activeTab ? activeTab.config : makeDefaultTabConfig();
 
   // Sync theme attribute on root <html>
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", settings.theme);
   }, [settings.theme]);
 
-  const handleSidebarToggle = (open: boolean) => {
-    setIsSidebarOpen(open);
-    try {
-      localStorage.setItem("raskroy_sidebar_open", String(open));
-    } catch {
-      // ignore storage errors
+  const handleSettingsChange = useCallback(
+    (newSettings: AppSettings) => {
+      setSettings((prev) => {
+        if (newSettings.sidebarPinned && !prev.sidebarPinned) {
+          setIsSidebarOpen(true);
+        }
+        return newSettings;
+      });
+      try {
+        localStorage.setItem("raskroy_settings", JSON.stringify(newSettings));
+      } catch (e) {
+        console.warn("Failed to persist settings", e);
+      }
+    },
+    []
+  );
+
+  const handleTogglePin = () => {
+    const nextPinned = !settings.sidebarPinned;
+    handleSettingsChange({ ...settings, sidebarPinned: nextPinned });
+    if (nextPinned) {
+      setIsSidebarOpen(true);
     }
   };
 
@@ -231,82 +269,161 @@ export default function App() {
     });
   };
 
-  const handleOpenSettings = (tab: SettingsTabType) => {
+  const handleOpenSettings = (tab: SettingsTabType = "algorithms") => {
     setSettingsTab(tab);
     setIsSettingsOpen(true);
   };
 
-  // Save settings when changed
-  const handleSettingsChange = (newSettings: AppSettings) => {
-    setSettings(newSettings);
-    try {
-      localStorage.setItem("raskroy_settings", JSON.stringify(newSettings));
-    } catch (e) {
-      console.warn("Failed to persist settings", e);
-    }
-  };
+  const updateTab = useCallback((tabId: string, updater: (t: CuttingTab) => CuttingTab) => {
+    setTabs((prev) => prev.map((t) => (t.id === tabId ? updater(t) : t)));
+  }, []);
 
-  const handleToggleTheme = (theme: AppTheme) => {
-    handleSettingsChange({ ...settings, theme });
-  };
+  // Calculate cutting plan for a specific tab ID
+  const calculateTabPlan = useCallback(
+    async (tabId: string, explicitSnapshot?: { stocks: Stock[]; parts: Part[]; config: CutConfig }) => {
+      const current = explicitSnapshot || tabsRef.current.find((t) => t.id === tabId);
+      if (!current) return;
 
-  // Perform calculation
-  const runCalculation = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    const start = performance.now();
+      const validStocks = current.stocks.filter((s) => s.length > 0);
+      const validParts = current.parts.filter((p) => p.length > 0 && p.quantity > 0);
 
-    try {
-      if (isTauri()) {
-        const result = await invoke<CuttingPlan>("calculate_cutting_plan", {
-          stocks,
-          parts,
-          config,
-        });
-        setPlan(result);
-        setCalcTimeMs(Math.round((performance.now() - start) * 10) / 10);
-        setLastCalculatedAt(
-          new Date().toLocaleTimeString("ru-RU", {
+      if (validStocks.length === 0 || validParts.length === 0) {
+        updateTab(tabId, (t) => ({
+          ...t,
+          plan: null,
+          error: null,
+          loading: false,
+          isDirty: false,
+        }));
+        return;
+      }
+
+      updateTab(tabId, (t) => ({ ...t, error: null, loading: true }));
+      const start = performance.now();
+
+      try {
+        if (isTauri()) {
+          const result = await invoke<CuttingPlan>("calculate_cutting_plan", {
+            stocks: validStocks,
+            parts: validParts,
+            config: current.config,
+          });
+          const elapsed = Math.round((performance.now() - start) * 10) / 10;
+          const timeStr = new Date().toLocaleTimeString("ru-RU", {
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
-          })
-        );
-        setIsDirty(false);
-      } else {
-        setError(
-          "Запущено в браузере. Для вызова Rust-ядра запустите десктопное приложение через `npm run tauri dev`."
-        );
+          });
+          updateTab(tabId, (t) => ({
+            ...t,
+            plan: result,
+            calcTimeMs: elapsed,
+            lastCalculatedAt: timeStr,
+            isDirty: false,
+            error: null,
+            loading: false,
+          }));
+        } else {
+          updateTab(tabId, (t) => ({
+            ...t,
+            error:
+              "Запущено в браузере. Для вызова Rust-ядра запустите приложение через `npm run tauri dev`.",
+            loading: false,
+          }));
+        }
+      } catch (err: unknown) {
+        console.error(err);
+        const msg =
+          typeof err === "string"
+            ? err
+            : err instanceof Error
+            ? err.message
+            : "Ошибка расчета раскроя";
+        updateTab(tabId, (t) => ({
+          ...t,
+          error: msg,
+          loading: false,
+        }));
       }
-    } catch (err: any) {
-      console.error(err);
-      setError(typeof err === "string" ? err : err.message || "Ошибка расчета раскроя");
-    } finally {
-      setLoading(false);
-    }
-  }, [stocks, parts, config]);
+    },
+    [updateTab]
+  );
 
-  // Track changes to inputs and mark dirty
-  const isInitialMount = useRef(true);
+  // Reactive calculation for active tab when inputs/config change
+  const inputFingerprint = activeTab
+    ? JSON.stringify({
+        id: activeTab.id,
+        stocks: activeTab.stocks,
+        parts: activeTab.parts,
+        config: activeTab.config,
+      })
+    : "";
+
+  const prevFingerprintRef = useRef<string>("");
+  const prevActiveIdRef = useRef<string | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      runCalculation();
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const curTab = activeTabId ? tabsRef.current.find((t) => t.id === activeTabId) : null;
+    if (!curTab) {
+      prevFingerprintRef.current = "";
+      prevActiveIdRef.current = null;
       return;
     }
-    setIsDirty(true);
+
+    const tabJustSwitched = prevActiveIdRef.current !== curTab.id;
+    prevActiveIdRef.current = curTab.id;
+
+    if (prevFingerprintRef.current === inputFingerprint) return;
+    prevFingerprintRef.current = inputFingerprint;
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+
+    // Switching to another tab that already has an up-to-date plan doesn't need recalc
+    if (tabJustSwitched && curTab.plan !== null && !curTab.isDirty) {
+      return;
+    }
+
+    // Only auto-trigger when inputs actually have data or clearing
+    const hasInputs =
+      curTab.stocks.some((s) => s.length > 0) &&
+      curTab.parts.some((p) => p.length > 0 && p.quantity > 0);
+
+    if (!hasInputs) {
+      if (curTab.plan !== null || curTab.error !== null) {
+        updateTab(curTab.id, (t) => ({
+          ...t,
+          plan: null,
+          error: null,
+          isDirty: false,
+        }));
+      }
+      return;
+    }
+
+    updateTab(curTab.id, (t) => ({ ...t, isDirty: true }));
 
     if (settings.calcMode === "instant") {
-      const handler = setTimeout(() => {
-        runCalculation();
+      const targetId = curTab.id;
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        calculateTabPlan(targetId);
       }, 150);
-      return () => clearTimeout(handler);
     }
-  }, [stocks, parts, config, settings.calcMode, runCalculation]);
+  }, [inputFingerprint, activeTabId, settings.calcMode, calculateTabPlan, updateTab]);
 
-  // Timer interval effect
+  // Timer interval effect for active tab in 'timer' mode
   useEffect(() => {
-    if (settings.calcMode !== "timer") {
+    if (settings.calcMode !== "timer" || !activeTab) {
       setTimerSecondsLeft(settings.timerSeconds);
       return;
     }
@@ -314,8 +431,8 @@ export default function App() {
     const interval = setInterval(() => {
       setTimerSecondsLeft((prev) => {
         if (prev <= 1) {
-          if (isDirty) {
-            runCalculation();
+          if (activeTab.isDirty) {
+            calculateTabPlan(activeTab.id);
           }
           return settings.timerSeconds;
         }
@@ -324,53 +441,241 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [settings.calcMode, settings.timerSeconds, isDirty, runCalculation]);
+  }, [settings.calcMode, settings.timerSeconds, activeTab, calculateTabPlan]);
 
-  // Window focus effect
+  // Window focus auto-recalc
   useEffect(() => {
     const handleFocus = () => {
-      if (settings.autoRecalcOnFocus && isDirty) {
-        runCalculation();
+      if (settings.autoRecalcOnFocus && activeTab?.isDirty) {
+        calculateTabPlan(activeTab.id);
       }
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [settings.autoRecalcOnFocus, isDirty, runCalculation]);
+  }, [settings.autoRecalcOnFocus, activeTab, calculateTabPlan]);
 
-  // Keyboard shortcuts: Ctrl+Enter (recalc), Ctrl+B (toggle sidebar)
+  // Create empty manual tab (clean slate, zero demo data!)
+  const handleStartManual = useCallback(() => {
+    const num = manualCounterRef.current++;
+    const tabTitle = `Новый раскрой #${num}`;
+    const newTab: CuttingTab = {
+      id: makeTabId(),
+      title: tabTitle,
+      meta: {
+        title: tabTitle,
+        material: "",
+        date: new Date().toLocaleDateString("ru-RU"),
+        orderNumber: "",
+      },
+      stocks: [],
+      parts: [],
+      config: makeDefaultTabConfig(),
+      plan: null,
+      loading: false,
+      error: null,
+      calcTimeMs: null,
+      lastCalculatedAt: null,
+      isDirty: false,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    setWelcomeError(null);
+  }, []);
+
+  // Keyboard shortcuts: Ctrl+Enter (recalc), Ctrl+B (toggle sidebar), Ctrl+T (new tab)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-        runCalculation();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && activeTabId) {
+        calculateTabPlan(activeTabId);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B") && !isWelcomeScreen) {
         e.preventDefault();
-        handleSidebarToggle(!isSidebarOpen);
+        setIsSidebarOpen((prev) => !prev);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "t" || e.key === "T")) {
+        e.preventDefault();
+        handleStartManual();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [runCalculation, isSidebarOpen]);
+  }, [activeTabId, isWelcomeScreen, calculateTabPlan, handleStartManual]);
 
-  const loadExample = () => {
-    setStocks(EXCEL_EXAMPLE_STOCKS);
-    setParts(EXCEL_EXAMPLE_PARTS);
-    setConfig(DEFAULT_CONFIG);
-    setMeta({
-      title: "Контрольный заказ из Excel",
-      material: "Хлыст 6100 мм (АО «Мобиль»)",
-      date: new Date().toLocaleDateString("ru-RU"),
-      orderNumber: "ЗК-EXCEL",
+  // Open imported groups as tabs and calculate each one
+  const handleImportAsTabs = useCallback(
+    (groups: ImportGroup[], sourceFile: string, fractionalCount = 0) => {
+      if (groups.length === 0) return;
+      const defaultLen = settings.defaultStockLength || 6000;
+      const baseTitle = sourceFile.replace(/\.(xlsx|xls|csv|txt)$/i, "");
+      const dateStr = new Date().toLocaleDateString("ru-RU");
+
+      const created: CuttingTab[] = groups.map((g, idx) => {
+        const stocks: Stock[] = [{ length: defaultLen, quantity: undefined }];
+        const tabConfig: CutConfig = makeDefaultTabConfig();
+        return {
+          id: makeTabId(),
+          title: g.tabTitle || `${baseTitle} #${idx + 1}`,
+          article: g.article,
+          colour: g.colour,
+          sourceFile,
+          meta: {
+            title:
+              groups.length > 1
+                ? `${baseTitle} [${idx + 1}/${groups.length}]`
+                : baseTitle,
+            material: g.materialLabel,
+            date: dateStr,
+            orderNumber: g.article || "",
+          },
+          stocks,
+          parts: g.parts,
+          config: tabConfig,
+          plan: null,
+          loading: true,
+          error: null,
+          calcTimeMs: null,
+          lastCalculatedAt: null,
+          isDirty: false,
+        };
+      });
+
+      setTabs((prev) => [...prev, ...created]);
+      setActiveTabId(created[0].id);
+
+      if (fractionalCount > 0) {
+        setImportNotice(
+          `Загружено вкладок: ${created.length} (хлыст ${defaultLen} мм). Дробных размеров округлено вверх: ${fractionalCount}.`
+        );
+      } else if (created.length > 1) {
+        setImportNotice(
+          `Создано ${created.length} вкладок по артикулам и цветам из «${sourceFile}» (хлыст по умолчанию ${defaultLen} мм).`
+        );
+      } else {
+        setImportNotice(null);
+      }
+
+      // Compute cutting plan for every created tab
+      (async () => {
+        for (const tab of created) {
+          await calculateTabPlan(tab.id, {
+            stocks: tab.stocks,
+            parts: tab.parts,
+            config: tab.config,
+          });
+        }
+      })();
+    },
+    [settings.defaultStockLength, calculateTabPlan]
+  );
+
+  // Direct file upload / drop from Welcome Screen or global workspace drop
+  const handleWelcomeSelectFile = useCallback(
+    async (file: File) => {
+      setWelcomeError(null);
+      setWelcomeLoading(true);
+      try {
+        const parsed = await parseExcelFile(file, settings.importOptions);
+        handleImportAsTabs(parsed.groups, parsed.fileName, parsed.fractionalRounded.length);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Ошибка чтения файла выгрузки.";
+        setWelcomeError(msg);
+      } finally {
+        setWelcomeLoading(false);
+      }
+    },
+    [settings.importOptions, handleImportAsTabs]
+  );
+
+  // Prevent WebView2 navigating on OS file drops anywhere in the window & accept spreadsheet drops
+  useEffect(() => {
+    const onWindowDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    const onWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+      if (isImportModalOpen || isSettingsOpen || isReportOpen) return;
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      if (/\.(xlsx|xls|csv|txt)$/i.test(file.name)) {
+        handleWelcomeSelectFile(file);
+      }
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [isImportModalOpen, isSettingsOpen, isReportOpen, handleWelcomeSelectFile]);
+
+  // Import into current active tab
+  const handleImportToCurrentTab = (newParts: Part[], replace: boolean, materialLabel?: string) => {
+    if (!activeTab) return;
+    const defaultLen = settings.defaultStockLength || 6000;
+    updateTab(activeTab.id, (t) => ({
+      ...t,
+      stocks: t.stocks.length === 0 ? [{ length: defaultLen, quantity: undefined }] : t.stocks,
+      parts: replace ? newParts : [...t.parts, ...newParts],
+      meta: materialLabel && !t.meta.material ? { ...t.meta, material: materialLabel } : t.meta,
+    }));
+  };
+
+  const handleLoadExample = () => {
+    const newTab: CuttingTab = {
+      id: makeTabId(),
+      title: "Пример из Excel",
+      meta: {
+        title: "Контрольный заказ из Excel",
+        material: "Профиль алюминиевый фасадный",
+        date: new Date().toLocaleDateString("ru-RU"),
+        orderNumber: "ЗК-EXCEL",
+      },
+      stocks: EXCEL_EXAMPLE_STOCKS,
+      parts: EXCEL_EXAMPLE_PARTS,
+      config: makeDefaultTabConfig(),
+      plan: null,
+      loading: true,
+      error: null,
+      calcTimeMs: null,
+      lastCalculatedAt: null,
+      isDirty: false,
+    };
+    setTabs((prev) => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+    calculateTabPlan(newTab.id, {
+      stocks: newTab.stocks,
+      parts: newTab.parts,
+      config: newTab.config,
     });
   };
 
-  const clearAll = () => {
-    setStocks([{ length: 6100, quantity: undefined }]);
-    setParts([{ length: 2000, quantity: 1, angle_left: 90, angle_right: 90 }]);
-    setPlan(null);
-    setIsDirty(true);
+  const handleClearActiveTab = () => {
+    if (!activeTab) return;
+    updateTab(activeTab.id, (t) => ({
+      ...t,
+      stocks: [],
+      parts: [],
+      plan: null,
+      error: null,
+      isDirty: false,
+    }));
   };
 
-  // Check GitHub Releases for updates
+  const handleCloseTab = (tabId: string) => {
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === tabId);
+      const nextTabs = prev.filter((t) => t.id !== tabId);
+      if (tabId === activeTabId) {
+        if (nextTabs.length === 0) {
+          setActiveTabId(null);
+        } else {
+          const fallbackIdx = Math.min(idx, nextTabs.length - 1);
+          setActiveTabId(nextTabs[fallbackIdx].id);
+        }
+      }
+      return nextTabs;
+    });
+  };
+
+  // GitHub updater commands
   const checkForUpdates = useCallback(async () => {
     if (!isTauri()) return;
     setUpdateError(null);
@@ -378,8 +683,14 @@ export default function App() {
     try {
       const res = await invoke<UpdateCheckResult>("check_for_updates");
       setUpdateInfo(res);
-    } catch (err: any) {
-      setUpdateError(typeof err === "string" ? err : err.message || "Ошибка проверки обновлений");
+    } catch (err: unknown) {
+      const msg =
+        typeof err === "string"
+          ? err
+          : err instanceof Error
+          ? err.message
+          : "Ошибка проверки обновлений";
+      setUpdateError(msg);
     } finally {
       setUpdateChecking(false);
     }
@@ -400,9 +711,15 @@ export default function App() {
         downloadUrl: updateInfo.download_url,
         assetName: updateInfo.asset_name,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setUpdateDownloading(false);
-      setUpdateError(typeof err === "string" ? err : err.message || "Ошибка установки обновления");
+      const msg =
+        typeof err === "string"
+          ? err
+          : err instanceof Error
+          ? err.message
+          : "Ошибка установки обновления";
+      setUpdateError(msg);
     }
   }, [updateInfo]);
 
@@ -418,7 +735,6 @@ export default function App() {
     }
   }, []);
 
-  // Load compiled version, subscribe to download progress, and run startup update check
   useEffect(() => {
     if (!isTauri()) return;
     invoke<string>("get_app_version")
@@ -443,301 +759,385 @@ export default function App() {
       if (unlisten) unlisten();
       if (startupTimer) clearTimeout(startupTimer);
     };
-  }, []); // Run once on app mount
-
-  const handleImportParts = (newParts: Part[], replace: boolean) => {
-    if (replace) {
-      setParts(newParts);
-    } else {
-      setParts((prev) => [...prev, ...newParts]);
-    }
-  };
+  }, []); // Run once on mount
 
   return (
     <>
-      <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans no-print selection:bg-[#dd4b19]/20 border border-[var(--border-main)]">
-        {/* Custom Frameless App Title Bar */}
-        <TitleBar appVersion={appVersion} documentTitle={meta.title} />
+      <div className="h-screen flex flex-col overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] font-sans no-print selection:bg-[var(--accent-subtle)]">
+        {/* Frameless App TitleBar */}
+        <TitleBar
+          appVersion={appVersion}
+          documentTitle={activeTab ? activeTab.title : "Стартовый экран"}
+        />
 
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* Collapsible & Horizontally Resizable Left Navigation Menu */}
-          <LeftSidebar
-            isOpen={isSidebarOpen}
-            widthPx={sidebarWidth}
-            onClose={() => handleSidebarToggle(false)}
+        {/* Welcome Screen (No sidebar visible!) vs Multi-Tab Workspace */}
+        {isWelcomeScreen ? (
+          <WelcomeScreen
             settings={settings}
-            onToggleTheme={handleToggleTheme}
-            appVersion={appVersion}
-            updateAvailableVersion={updateInfo?.has_update ? updateInfo.latest_version : null}
-            isDirty={isDirty}
-            loading={loading}
-            calcTimeMs={calcTimeMs}
-            lastCalculatedAt={lastCalculatedAt}
-            timerSecondsLeft={timerSecondsLeft}
-            hasPlan={Boolean(plan)}
-            onCalculate={runCalculation}
-            onOpenSettings={handleOpenSettings}
-            onOpenReport={() => setIsReportOpen(true)}
-            onOpenImport={() => setIsImportModalOpen(true)}
-            onDownloadSample={downloadSampleExcel}
-            onLoadExample={loadExample}
-            onClearAll={clearAll}
+            existingTabsCount={tabs.length}
+            loadingFile={welcomeLoading}
+            error={welcomeError}
+            onSelectFile={handleWelcomeSelectFile}
+            onStartManual={handleStartManual}
+            onOpenSettings={() => handleOpenSettings("algorithms")}
+            onOpenImportModal={() => setIsImportModalOpen(true)}
+            onReturnToTabs={() => {
+              if (tabs[0]) setActiveTabId(tabs[0].id);
+            }}
           />
-
-          {isSidebarOpen && (
-            <ResizeHandle
-              orientation="vertical"
-              onResize={handleSidebarResize}
-              onReset={() => {
-                setSidebarWidth(236);
-                localStorage.setItem("raskroy_sidebar_width", "236");
+        ) : (
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Hidden by default Left Sidebar; user reveals via Menu button or locks open via Pin */}
+            <LeftSidebar
+              isOpen={isSidebarOpen}
+              pinned={settings.sidebarPinned}
+              widthPx={sidebarWidth}
+              onTogglePin={handleTogglePin}
+              onClose={() => {
+                if (settings.sidebarPinned) {
+                  handleSettingsChange({ ...settings, sidebarPinned: false });
+                }
+                setIsSidebarOpen(false);
               }}
-              title="Потяните для изменения ширины бокового меню"
+              settings={settings}
+              appVersion={appVersion}
+              updateAvailableVersion={updateInfo?.has_update ? updateInfo.latest_version : null}
+              isDirty={activeTab.isDirty}
+              loading={activeTab.loading}
+              calcTimeMs={activeTab.calcTimeMs}
+              timerSecondsLeft={timerSecondsLeft}
+              hasPlan={Boolean(activeTab.plan)}
+              onCalculate={() => calculateTabPlan(activeTab.id)}
+              onNewTab={handleStartManual}
+              onOpenImport={() => setIsImportModalOpen(true)}
+              onOpenReport={() => {
+                setReportScope("active");
+                setIsReportOpen(true);
+              }}
+              onClearTab={handleClearActiveTab}
+              onOpenSettings={handleOpenSettings}
             />
-          )}
 
-          {/* Right / Main Fluid Workspace */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-          {/* Clean Top Toolbar & Document Metadata */}
-          <header className="border-b border-[var(--border-main)] bg-[var(--bg-surface)] px-4 md:px-5 py-2 no-print">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {/* Left cluster */}
-              <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
-                {!isSidebarOpen && (
-                  <div className="flex items-center gap-2.5 pr-3 border-r border-[var(--border-main)]">
-                    <button
-                      onClick={() => handleSidebarToggle(true)}
-                      className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors cursor-pointer"
-                      title="Показать левую панель меню (Ctrl+B)"
-                    >
-                      <PanelLeft className="w-4 h-4 stroke-[1.5] text-[#dd4b19]" />
-                      <span>Меню</span>
-                    </button>
-                    <MobilLogo
-                      height={16}
-                      showWordmark={true}
-                      accentColor="#dd4b19"
-                      color="var(--text-primary)"
-                      className="hidden sm:inline-block"
-                    />
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[var(--text-muted)]">Документ:</span>
-                  <input
-                    type="text"
-                    value={meta.title}
-                    onChange={(e) => setMeta({ ...meta, title: e.target.value })}
-                    placeholder="Название заказа / наряда"
-                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[#dd4b19] w-44 md:w-56"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[var(--text-muted)]">Материал:</span>
-                  <input
-                    type="text"
-                    value={meta.material}
-                    onChange={(e) => setMeta({ ...meta, material: e.target.value })}
-                    placeholder="Название материала (профиль, артикул...)"
-                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[#dd4b19] w-48 md:w-72"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-[var(--text-muted)]">Дата:</span>
-                  <input
-                    type="text"
-                    value={meta.date}
-                    onChange={(e) => setMeta({ ...meta, date: e.target.value })}
-                    className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] text-xs font-mono w-24 text-center focus:outline-none focus:border-[#dd4b19]"
-                  />
-                </div>
-              </div>
-
-              {/* Right cluster */}
-              <div className="flex items-center gap-2 shrink-0">
-                {calcTimeMs !== null && (
-                  <span className="text-[11px] text-[var(--text-muted)] font-mono hidden xl:inline-block">
-                    {calcTimeMs} мс {lastCalculatedAt && `• ${lastCalculatedAt}`}
-                  </span>
-                )}
-
-                {/* Quick theme toggle */}
-                <button
-                  onClick={() => handleToggleTheme(settings.theme === "light" ? "dark" : "light")}
-                  className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] rounded border border-[var(--border-main)] transition-colors cursor-pointer"
-                  title={
-                    settings.theme === "light"
-                      ? "Переключить на тёмную тему"
-                      : "Переключить на светлую тему"
-                  }
-                >
-                  {settings.theme === "light" ? (
-                    <Moon className="w-4 h-4 stroke-[1.5]" />
-                  ) : (
-                    <Sun className="w-4 h-4 stroke-[1.5]" />
-                  )}
-                </button>
-
-                {!isSidebarOpen && (
-                  <>
-                    <button
-                      onClick={runCalculation}
-                      disabled={loading}
-                      className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-50 ${
-                        isDirty && settings.calcMode !== "instant"
-                          ? "bg-[#dd4b19] hover:bg-[#c53f12] text-white"
-                          : "bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-main)]"
-                      }`}
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 stroke-[1.5] text-[#dd4b19] ${
-                          loading ? "animate-spin" : ""
-                        } ${isDirty && settings.calcMode !== "instant" ? "!text-white" : ""}`}
-                      />
-                      <span>Обновить</span>
-                    </button>
-
-                    <button
-                      onClick={() => setIsReportOpen(true)}
-                      disabled={!plan}
-                      className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors disabled:opacity-40 cursor-pointer"
-                    >
-                      <FileText className="w-3.5 h-3.5 stroke-[1.5] text-[#dd4b19]" />
-                      <span className="hidden sm:inline">Отчёт</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleOpenSettings("refresh")}
-                      className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] rounded border border-[var(--border-main)] transition-colors cursor-pointer"
-                      title="Настройки"
-                    >
-                      <Sliders className="w-4 h-4 stroke-[1.5]" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </header>
-
-          {/* Main Workspace Resizable Split Grid */}
-          <main ref={splitContainerRef} className="flex-1 w-full p-3.5 md:p-5 space-y-3 no-print">
-            {error && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded text-rose-600 dark:text-rose-300 text-xs flex items-center gap-2.5">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <div
-              className="flex flex-col xl:flex-row items-stretch gap-3 xl:gap-0"
-              style={{ "--left-pane-pct": `${leftPanePct}%` } as React.CSSProperties}
-            >
-              {/* Left Resizable Column: Specifications & Parameters */}
-              <div className="xl-split-left space-y-3 xl:pr-1.5">
-                <ConfigPanel config={config} onChange={setConfig} />
-                <StockTable stocks={stocks} onChange={setStocks} />
-                <PartsTable
-                  parts={parts}
-                  onChange={setParts}
-                  hoveredLength={hoveredLength}
-                  onHoverLength={setHoveredLength}
-                  presets={settings.anglePresets}
-                  onOpenImport={() => setIsImportModalOpen(true)}
-                />
-              </div>
-
-              {/* Draggable Horizontal Splitter */}
+            {isSidebarOpen && (
               <ResizeHandle
                 orientation="vertical"
-                onResize={handleMainSplitResize}
+                onResize={handleSidebarResize}
                 onReset={() => {
-                  setLeftPanePct(44);
-                  localStorage.setItem("raskroy_left_pane_pct", "44");
+                  setSidebarWidth(228);
+                  localStorage.setItem("raskroy_sidebar_width", "228");
                 }}
-                title="Потяните, чтобы растянуть или сузить колонки таблиц и карт раскроя (двойной клик — сброс)"
+                title="Потяните для изменения ширины бокового меню"
+              />
+            )}
+
+            {/* Main Right Area: Tabs Bar + Toolbar + Workspace Split Grid */}
+            <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+              <TabsBar
+                tabs={tabs}
+                activeTabId={activeTab.id}
+                isSidebarOpen={isSidebarOpen}
+                onRevealSidebar={() => setIsSidebarOpen(true)}
+                onGoHome={() => setActiveTabId(null)}
+                onSelectTab={(id) => setActiveTabId(id)}
+                onCloseTab={handleCloseTab}
+                onAddNewTab={handleStartManual}
+                onOpenSettings={() => handleOpenSettings("algorithms")}
+                onOpenBatchReport={() => {
+                  setReportScope("all");
+                  setIsReportOpen(true);
+                }}
               />
 
-              {/* Right Resizable Column: Key Stats & Cutting Diagrams */}
-              <div className="flex-1 min-w-0 w-full space-y-3 xl:pl-1.5">
-                {plan && (
-                  <>
-                    <SummaryStats summary={plan.summary} patternCount={plan.patterns.length} />
-
-                    {plan.unplaced.length > 0 && (
-                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-amber-800 dark:text-amber-200 text-xs">
-                        <div className="font-semibold mb-1">
-                          Недостаточно заготовок на складе для позиций:
-                        </div>
-                        <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px]">
-                          {plan.unplaced.map((p, idx) => (
-                            <li key={idx}>
-                              Длина {p.length} мм — {p.quantity} шт.
-                            </li>
-                          ))}
-                        </ul>
+              {/* Scrollable Workspace Content */}
+              <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+                {/* Document Metadata Toolbar */}
+                <header className="border-b border-[var(--border-main)] bg-[var(--bg-surface)] px-4 md:px-5 py-2 no-print shrink-0">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-[var(--text-muted)]">Документ:</span>
+                        <input
+                          type="text"
+                          value={activeTab.meta.title}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateTab(activeTab.id, (t) => ({
+                              ...t,
+                              meta: { ...t.meta, title: val },
+                            }));
+                          }}
+                          placeholder="Название заказа"
+                          className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[var(--accent)] w-44 md:w-52"
+                        />
                       </div>
-                    )}
 
-                    <CuttingVisualizer
-                      patterns={plan.patterns}
-                      hoveredLength={hoveredLength}
-                      onHoverLength={setHoveredLength}
-                      onOpenReport={() => setIsReportOpen(true)}
-                      barDensity={settings.barDensity}
-                      onBarDensityChange={(density) =>
-                        handleSettingsChange({ ...settings, barDensity: density })
-                      }
-                      trimLeft={config.trim_left}
-                      trimRight={config.trim_right}
-                      activeAlgorithm={config.algorithm || "auto"}
-                      onOpenAlgorithmSettings={() => handleOpenSettings("cutting")}
-                    />
-                  </>
-                )}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-[var(--text-muted)]">Материал:</span>
+                        <input
+                          type="text"
+                          value={activeTab.meta.material}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateTab(activeTab.id, (t) => ({
+                              ...t,
+                              meta: { ...t.meta, material: val },
+                            }));
+                          }}
+                          placeholder="Профиль, артикул, цвет..."
+                          className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2.5 py-1 text-[var(--text-primary)] text-xs focus:outline-none focus:border-[var(--accent)] w-48 md:w-68"
+                        />
+                      </div>
 
-                {!plan && !loading && (
-                  <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] rounded-lg p-16 text-center space-y-2">
-                    <div className="text-xs text-[var(--text-primary)] font-semibold">
-                      Нет активного расчёта
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-[var(--text-muted)]">Дата:</span>
+                        <input
+                          type="text"
+                          value={activeTab.meta.date}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateTab(activeTab.id, (t) => ({
+                              ...t,
+                              meta: { ...t.meta, date: val },
+                            }));
+                          }}
+                          className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] text-xs font-mono w-24 text-center focus:outline-none focus:border-[var(--accent)]"
+                        />
+                      </div>
                     </div>
-                    <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto">
-                      Заполните склад и спецификацию деталей, затем нажмите «Обновить» или Ctrl+Enter.
-                    </p>
+
+                    {/* Right Toolbar Cluster */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {activeTab.calcTimeMs !== null && (
+                        <span className="text-[11px] text-[var(--text-muted)] font-mono hidden xl:inline-block">
+                          {activeTab.calcTimeMs} мс{" "}
+                          {activeTab.lastCalculatedAt && `• ${activeTab.lastCalculatedAt}`}
+                        </span>
+                      )}
+
+                      {!isSidebarOpen && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => calculateTabPlan(activeTab.id)}
+                            disabled={activeTab.loading}
+                            className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded transition-colors cursor-pointer disabled:opacity-50 ${
+                              activeTab.isDirty && settings.calcMode !== "instant"
+                                ? "bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white"
+                                : "bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border-main)]"
+                            }`}
+                          >
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 stroke-[1.5] text-[var(--accent)] ${
+                                activeTab.loading ? "animate-spin" : ""
+                              } ${
+                                activeTab.isDirty && settings.calcMode !== "instant"
+                                  ? "!text-white"
+                                  : ""
+                              }`}
+                            />
+                            <span>Обновить</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReportScope("active");
+                              setIsReportOpen(true);
+                            }}
+                            disabled={!activeTab.plan}
+                            className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors disabled:opacity-40 cursor-pointer"
+                          >
+                            <FileText className="w-3.5 h-3.5 stroke-[1.5] text-[var(--accent)]" />
+                            <span className="hidden sm:inline">Отчёт</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                )}
+                </header>
+
+                {/* Main Split Workspace */}
+                <main ref={splitContainerRef} className="flex-1 w-full p-3.5 md:p-5 space-y-3 no-print">
+                  {importNotice && (
+                    <div className="p-2.5 px-3.5 bg-sky-500/10 border border-sky-500/30 rounded-lg text-sky-800 dark:text-sky-200 text-xs flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <Info className="w-4 h-4 shrink-0" />
+                        <span>{importNotice}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setImportNotice(null)}
+                        className="p-0.5 hover:opacity-75 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {activeTab.error && (
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/25 rounded text-rose-600 dark:text-rose-300 text-xs flex items-center gap-2.5">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{activeTab.error}</span>
+                    </div>
+                  )}
+
+                  <div
+                    className="flex flex-col xl:flex-row items-stretch gap-3 xl:gap-0"
+                    style={{ "--left-pane-pct": `${leftPanePct}%` } as React.CSSProperties}
+                  >
+                    {/* Left Resizable Column */}
+                    <div className="xl-split-left space-y-3 xl:pr-1.5">
+                      <ConfigPanel
+                        config={activeTab.config}
+                        onChange={(nextCfg) => {
+                          try {
+                            if (nextCfg.stock_priority) {
+                              localStorage.setItem("raskroy_stock_priority", nextCfg.stock_priority);
+                            }
+                          } catch {
+                            // ignore
+                          }
+                          updateTab(activeTab.id, (t) => ({ ...t, config: nextCfg }));
+                        }}
+                      />
+                      <StockTable
+                        stocks={activeTab.stocks}
+                        defaultStockLength={settings.defaultStockLength}
+                        onChange={(nextStocks) =>
+                          updateTab(activeTab.id, (t) => ({ ...t, stocks: nextStocks }))
+                        }
+                      />
+                      <PartsTable
+                        parts={activeTab.parts}
+                        onChange={(nextParts) =>
+                          updateTab(activeTab.id, (t) => ({ ...t, parts: nextParts }))
+                        }
+                        hoveredLength={hoveredLength}
+                        onHoverLength={setHoveredLength}
+                        presets={settings.anglePresets}
+                        onOpenImport={() => setIsImportModalOpen(true)}
+                      />
+                    </div>
+
+                    {/* Horizontal Splitter */}
+                    <ResizeHandle
+                      orientation="vertical"
+                      onResize={handleMainSplitResize}
+                      onReset={() => {
+                        setLeftPanePct(44);
+                        localStorage.setItem("raskroy_left_pane_pct", "44");
+                      }}
+                      title="Потяните, чтобы растянуть или сузить колонки таблиц и карт раскроя (двойной клик — сброс)"
+                    />
+
+                    {/* Right Resizable Column */}
+                    <div className="flex-1 min-w-0 w-full space-y-3 xl:pl-1.5">
+                      {activeTab.plan && (
+                        <>
+                          <SummaryStats
+                            summary={activeTab.plan.summary}
+                            patternCount={activeTab.plan.patterns.length}
+                          />
+
+                          {activeTab.plan.unplaced.length > 0 && (
+                            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded text-amber-800 dark:text-amber-200 text-xs">
+                              <div className="font-semibold mb-1">
+                                Недостаточно заготовок на складе для позиций:
+                              </div>
+                              <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px]">
+                                {activeTab.plan.unplaced.map((p, idx) => (
+                                  <li key={idx}>
+                                    Длина {p.length} мм — {p.quantity} шт.
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          <CuttingVisualizer
+                            patterns={activeTab.plan.patterns}
+                            hoveredLength={hoveredLength}
+                            onHoverLength={setHoveredLength}
+                            onOpenReport={() => {
+                              setReportScope("active");
+                              setIsReportOpen(true);
+                            }}
+                            barDensity={settings.barDensity}
+                            onBarDensityChange={(density) =>
+                              handleSettingsChange({ ...settings, barDensity: density })
+                            }
+                            trimLeft={activeTab.config.trim_left}
+                            trimRight={activeTab.config.trim_right}
+                            activeAlgorithm={activeTab.config.algorithm || "auto"}
+                            onOpenAlgorithmSettings={() => handleOpenSettings("algorithms")}
+                          />
+                        </>
+                      )}
+
+                      {!activeTab.plan && !activeTab.loading && (
+                        <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] rounded-lg p-16 text-center space-y-2">
+                          <div className="text-xs text-[var(--text-primary)] font-semibold">
+                            Рабочая область готова к вводу
+                          </div>
+                          <p className="text-[11px] text-[var(--text-muted)] max-w-sm mx-auto">
+                            Добавьте заготовки на склад и требуемые детали в спецификацию (или
+                            импортируйте файл Excel / CSV).
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </main>
+
+                {/* Footer */}
+                <footer className="border-t border-[var(--border-main)] bg-[var(--bg-surface)] py-2 px-5 text-[11px] text-[var(--text-muted)] font-mono flex items-center justify-between no-print mt-auto shrink-0">
+                  <span>
+                    {settings.companyName} &bull; Линейный раскрой v{appVersion} &bull; Rust Core
+                  </span>
+                  <span>Материал: {activeTab.meta.material || "Не указан"}</span>
+                </footer>
               </div>
             </div>
-          </main>
+          </div>
+        )}
 
-        {/* Footer */}
-          <footer className="border-t border-[var(--border-main)] bg-[var(--bg-surface)] py-2 px-5 text-[11px] text-[var(--text-muted)] font-mono flex items-center justify-between no-print mt-auto">
-            <span>
-              {settings.companyName} &bull; Линейный раскрой v{appVersion} &bull; Rust Core
-            </span>
-            <span>Материал: {meta.material || "Не указан"}</span>
-          </footer>
-        </div>
-        </div>
-
-        {/* Left Slide-out Settings Drawer */}
+        {/* Dedicated Settings Workspace Overlay (Accessible from WelcomeScreen & Workspace) */}
         <SettingsDrawer
           isOpen={isSettingsOpen}
           onClose={() => setIsSettingsOpen(false)}
           initialTab={settingsTab}
           settings={settings}
           onSettingsChange={handleSettingsChange}
-          config={config}
-          onConfigChange={setConfig}
-          calcTimeMs={calcTimeMs}
-          onManualRefresh={runCalculation}
+          config={fallbackConfig}
+          onConfigChange={(nextCfg) => {
+            try {
+              if (nextCfg.algorithm) {
+                localStorage.setItem("raskroy_cut_algorithm", nextCfg.algorithm);
+              }
+              if (nextCfg.stock_priority) {
+                localStorage.setItem("raskroy_stock_priority", nextCfg.stock_priority);
+              }
+            } catch {
+              // ignore
+            }
+            if (activeTab) {
+              updateTab(activeTab.id, (t) => ({ ...t, config: nextCfg }));
+            }
+          }}
+          calcTimeMs={activeTab?.calcTimeMs ?? null}
+          onManualRefresh={() => {
+            if (activeTab) calculateTabPlan(activeTab.id);
+          }}
           onOpenReportPreview={() => {
             setIsSettingsOpen(false);
-            setIsReportOpen(true);
+            if (activeTab?.plan) {
+              setReportScope("active");
+              setIsReportOpen(true);
+            }
           }}
-          isCalculating={loading}
+          onDownloadSample={downloadSampleExcel}
+          onLoadExample={handleLoadExample}
+          isCalculating={Boolean(activeTab?.loading)}
           appVersion={appVersion}
           updateInfo={updateInfo}
           updateChecking={updateChecking}
@@ -749,42 +1149,68 @@ export default function App() {
           onOpenReleasePage={handleOpenReleasePage}
         />
 
-        {/* Excel Import Modal */}
+        {/* Excel / CSV Import Modal */}
         <ImportExcelModal
           isOpen={isImportModalOpen}
           onClose={() => setIsImportModalOpen(false)}
-          onImport={handleImportParts}
+          hasActiveTab={Boolean(activeTab)}
+          importOptions={settings.importOptions}
+          defaultStockLength={settings.defaultStockLength}
+          onImportToCurrentTab={handleImportToCurrentTab}
+          onImportAsTabs={(groups, file) => handleImportAsTabs(groups, file)}
         />
 
-        {/* Printable Report Modal (Preview) */}
-        {plan && (
+        {/* Printable Report Modal */}
+        {(activeTab?.plan || (reportScope === "all" && printableTabs.length > 0)) && (
           <ReportModal
             isOpen={isReportOpen}
             onClose={() => setIsReportOpen(false)}
             onOpenReportEditor={() => handleOpenSettings("report")}
-            plan={plan}
-            meta={meta}
-            onMetaChange={setMeta}
-            config={config}
+            plan={activeTab?.plan || printableTabs[0].plan!}
+            meta={activeTab?.meta || printableTabs[0].meta}
+            onMetaChange={(nextMeta) => {
+              const targetId = activeTab?.plan ? activeTab.id : printableTabs[0]?.id;
+              if (targetId) {
+                updateTab(targetId, (t) => ({ ...t, meta: nextMeta }));
+              }
+            }}
+            config={activeTab?.config || printableTabs[0].config}
             settings={settings}
+            printableTabs={printableTabs}
+            reportScope={reportScope}
+            onReportScopeChange={setReportScope}
           />
         )}
       </div>
 
-      {/* Dedicated Paper Print Document (Directly rendered for window.print()) */}
-      {plan && (
+      {/* Dedicated Paper Print Document (supports single active tab or all calculated tabs) */}
+      {(activeTab?.plan || (reportScope === "all" && printableTabs.length > 0)) && (
         <div className="print-document">
-          <PrintReport
-            plan={plan}
-            meta={meta}
-            cutWidth={config.cut_width}
-            trimLeft={config.trim_left}
-            trimRight={config.trim_right}
-            minRemnant={config.min_remnant}
-            twoProfiles={config.two_profiles}
-            settings={settings}
-            isPreview={false}
-          />
+          {(reportScope === "all" && printableTabs.length > 1
+            ? printableTabs
+            : activeTab?.plan
+            ? [activeTab]
+            : printableTabs.slice(0, 1)
+          ).map((tab, idx, arr) =>
+            tab.plan ? (
+              <div
+                key={tab.id}
+                className={idx < arr.length - 1 ? "print-tab-page-break" : undefined}
+              >
+                <PrintReport
+                  plan={tab.plan}
+                  meta={tab.meta}
+                  cutWidth={tab.config.cut_width}
+                  trimLeft={tab.config.trim_left}
+                  trimRight={tab.config.trim_right}
+                  minRemnant={tab.config.min_remnant}
+                  twoProfiles={tab.config.two_profiles}
+                  settings={settings}
+                  isPreview={false}
+                />
+              </div>
+            ) : null
+          )}
         </div>
       )}
     </>

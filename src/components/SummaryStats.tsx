@@ -72,7 +72,7 @@ export const SummaryStats: React.FC<SummaryStatsProps> = ({ summary, patternCoun
       </div>
 
       {/* 5. Карт раскроя */}
-      <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] border-t-2 border-t-[#dd4b19] rounded-lg p-3 flex flex-col justify-between col-span-2 md:col-span-1">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-main)] border-t-2 border-t-[var(--accent)] rounded-lg p-3 flex flex-col justify-between col-span-2 md:col-span-1">
         <span className="text-[11px] font-medium text-[var(--text-secondary)]">
           Карт раскроя
         </span>

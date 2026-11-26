@@ -186,9 +186,9 @@ export const PartsTable: React.FC<PartsTableProps> = ({
             <button
               onClick={onOpenImport}
               className="flex items-center gap-1.5 text-xs text-[var(--text-primary)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] px-2.5 py-1.5 rounded border border-[var(--border-main)] transition-colors cursor-pointer"
-              title="Загрузить детали из Excel файла"
+              title="Загрузить детали из Excel/CSV файла"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#dd4b19]" />
+              <FileSpreadsheet className="w-3.5 h-3.5 text-[var(--accent)]" />
               <span>Импорт Excel</span>
             </button>
           )}
@@ -224,7 +224,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
           {/* Add row */}
           <button
             onClick={addPart}
-            className="flex items-center gap-1 text-xs font-medium text-white bg-[#dd4b19] hover:bg-[#c53f12] px-2.5 py-1.5 rounded transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-xs font-medium text-white bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-2.5 py-1.5 rounded transition-colors cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Добавить</span>
@@ -237,6 +237,14 @@ export const PartsTable: React.FC<PartsTableProps> = ({
         className="overflow-x-auto overflow-y-auto px-3.5 py-1.5"
         style={{ maxHeight: tableHeight }}
       >
+        {parts.length === 0 ? (
+          <div className="py-10 text-center space-y-1.5">
+            <div className="text-xs font-medium text-[var(--text-secondary)]">Нет ни одной детали</div>
+            <p className="text-[11px] text-[var(--text-muted)] max-w-xs mx-auto">
+              Нажмите «+ Добавить», чтобы задать отрезки вручную, или загрузите таблицу Excel / CSV
+            </p>
+          </div>
+        ) : (
         <table className={`w-full text-xs text-left ${showPlane2 ? "min-w-[660px]" : "min-w-[490px]"}`}>
           <thead className="text-[var(--text-muted)] font-normal border-b border-[var(--border-subtle)] sticky top-0 bg-[var(--bg-surface)] z-10">
             <tr>
@@ -272,7 +280,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                   onMouseEnter={() => onHoverLength(part.length)}
                   onMouseLeave={() => onHoverLength(null)}
                   className={`transition-colors ${
-                    isHovered ? "bg-[#dd4b19]/10" : "hover:bg-[var(--bg-hover)]/50"
+                    isHovered ? "bg-[var(--accent-subtle)]" : "hover:bg-[var(--bg-hover)]/50"
                   }`}
                 >
                   <td className="py-1.5 px-1.5 text-[var(--text-muted)] font-mono">{i + 1}</td>
@@ -284,7 +292,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                       value={part.label || ""}
                       onChange={(e) => updatePart(i, "label", e.target.value)}
                       placeholder="Профиль 1"
-                      className="w-full min-w-[98px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] text-[11px] focus:outline-none focus:border-[#dd4b19]"
+                      className="w-full min-w-[98px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] text-[11px] focus:outline-none focus:border-[var(--accent)]"
                     />
                   </td>
 
@@ -297,7 +305,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                         updatePart(i, "length", Math.max(0, parseInt(e.target.value) || 0))
                       }
                       placeholder="2700"
-                      className="w-full min-w-[60px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] font-mono text-xs focus:outline-none focus:border-[#dd4b19]"
+                      className="w-full min-w-[60px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] font-mono text-xs focus:outline-none focus:border-[var(--accent)]"
                     />
                   </td>
 
@@ -310,7 +318,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                         updatePart(i, "quantity", Math.max(1, parseInt(e.target.value) || 1))
                       }
                       placeholder="1"
-                      className="w-full min-w-[44px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-center text-[var(--text-primary)] font-mono text-xs focus:outline-none focus:border-[#dd4b19]"
+                      className="w-full min-w-[44px] bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-center text-[var(--text-primary)] font-mono text-xs focus:outline-none focus:border-[var(--accent)]"
                     />
                   </td>
 
@@ -329,7 +337,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                             onChange={(e) =>
                               updatePart(i, "angle_left", parseFloat(e.target.value) || 0)
                             }
-                            className="w-12 bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-1 py-0.5 text-[var(--text-primary)] text-center focus:outline-none focus:border-[#dd4b19]"
+                            className="w-12 bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-1 py-0.5 text-[var(--text-primary)] text-center focus:outline-none focus:border-[var(--accent)]"
                           />
                           <span className="text-[var(--text-muted)]">°</span>
                           <span className="text-[var(--text-muted)] ml-0.5">R:</span>
@@ -340,7 +348,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                             onChange={(e) =>
                               updatePart(i, "angle_right", parseFloat(e.target.value) || 0)
                             }
-                            className="w-12 bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-1 py-0.5 text-[var(--text-primary)] text-center focus:outline-none focus:border-[#dd4b19]"
+                            className="w-12 bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-1 py-0.5 text-[var(--text-primary)] text-center focus:outline-none focus:border-[var(--accent)]"
                           />
                           <span className="text-[var(--text-muted)]">°</span>
                           <button
@@ -372,7 +380,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
                                 onChange(updated);
                               }
                             }}
-                            className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] font-mono text-[11px] focus:outline-none focus:border-[#dd4b19] flex-1"
+                            className="bg-[var(--bg-subtle)] border border-[var(--border-input)] rounded px-2 py-1 text-[var(--text-primary)] font-mono text-[11px] focus:outline-none focus:border-[var(--accent)] flex-1"
                           >
                             {presets.map((p) => (
                               <option key={p.id} value={p.id}>
@@ -450,6 +458,7 @@ export const PartsTable: React.FC<PartsTableProps> = ({
             })}
           </tbody>
         </table>
+        )}
       </div>
 
       <div className="px-3.5 py-2 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-muted)] flex justify-between font-mono flex-wrap gap-2">

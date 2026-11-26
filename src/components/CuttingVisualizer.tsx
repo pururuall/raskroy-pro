@@ -38,8 +38,8 @@ const SEGMENT_PALETTE: SegmentPalette[] = [
 ];
 
 const HOVER_PALETTE: SegmentPalette = {
-  fill: "#dd4b19",
-  stroke: "#9a3412",
+  fill: "var(--accent)",
+  stroke: "var(--accent-hover)",
   text: "#ffffff",
   angleText: "#ffedd5",
 };
@@ -475,10 +475,10 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
               <button
                 type="button"
                 onClick={onOpenAlgorithmSettings}
-                className="inline-flex items-center gap-1 text-[10.5px] font-medium px-2 py-0.5 rounded bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[#dd4b19] border border-[var(--border-main)] transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1 text-[10.5px] font-medium px-2 py-0.5 rounded bg-[var(--bg-subtle)] hover:bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--accent)] border border-[var(--border-main)] transition-colors cursor-pointer"
                 title={activeAlgoInfo.howItWorks}
               >
-                <Cpu className="w-3 h-3 text-[#dd4b19]" />
+                <Cpu className="w-3 h-3 text-[var(--accent)]" />
                 <span>{activeAlgoInfo.name}</span>
               </button>
             )}
@@ -535,7 +535,7 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
             onClick={() => setShowAnglesOnBar(!showAnglesOnBar)}
             className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border transition-colors cursor-pointer ${
               showAnglesOnBar
-                ? "bg-[#dd4b19]/10 border-[#dd4b19]/40 text-[#dd4b19] font-medium"
+                ? "bg-[var(--accent-subtle)] border-[var(--accent)]/40 text-[var(--accent)] font-medium"
                 : "bg-[var(--bg-subtle)] border-[var(--border-main)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             }`}
             title="Показывать или скрывать градусы прямо на полосе"
@@ -565,7 +565,7 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
           return (
             <div
               key={pIdx}
-              className="bg-[var(--bg-subtle)] border border-[var(--border-main)] rounded-lg p-2.5 hover:border-[#dd4b19]/40 transition-colors"
+              className="bg-[var(--bg-subtle)] border border-[var(--border-main)] rounded-lg p-2.5 hover:border-[var(--accent)]/40 transition-colors"
             >
               {/* Pattern Header */}
               <div className="flex items-center justify-between gap-2 mb-1.5 text-xs">
@@ -640,7 +640,7 @@ export const CuttingVisualizer: React.FC<CuttingVisualizerProps> = ({
                       onMouseLeave={() => onHoverLength(null)}
                       className={`px-1.5 py-0.5 rounded border transition-colors cursor-pointer inline-flex items-center gap-1.5 ${
                         isHovered
-                          ? "bg-[#dd4b19] text-white border-[#dd4b19] font-medium"
+                          ? "bg-[var(--accent)] text-white border-[var(--accent)] font-medium"
                           : "bg-[var(--bg-surface)] text-[var(--text-primary)] border-[var(--border-main)]"
                       }`}
                     >

@@ -7,6 +7,8 @@ pub struct Stock {
     pub id: Option<String>,
     pub length: u32,
     pub quantity: Option<u32>, // None = unlimited
+    #[serde(default)]
+    pub is_remnant: bool, // true = обрезок/остаток со склада (расходуется в 1-ю очередь)
 }
 
 impl Stock {
@@ -15,6 +17,16 @@ impl Stock {
             id: None,
             length,
             quantity,
+            is_remnant: false,
+        }
+    }
+
+    pub fn remnant(length: u32, quantity: Option<u32>) -> Self {
+        Self {
+            id: None,
+            length,
+            quantity,
+            is_remnant: true,
         }
     }
 }
@@ -61,6 +73,15 @@ pub enum CuttingAlgorithm {
     MinPatterns,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StockPriorityMode {
+    #[default]
+    MinTotalLength, // Экономия метража + автоматический подбор остатков/коротких заготовок
+    RemnantsFirst,  // Строго срабатывать обрезки/остатки в первую очередь
+    MinBarsCount,   // Минимум хлыстов в штуках (длинные сначала)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CutConfig {
     pub cut_width: u32,      // Kerf (ширина пропила пилы, мм)
@@ -70,6 +91,8 @@ pub struct CutConfig {
     pub two_profiles: bool,  // Раскрой в 2 профиля (спаренный рез)
     #[serde(default)]
     pub algorithm: CuttingAlgorithm, // Выбранный алгоритм расчёта
+    #[serde(default)]
+    pub stock_priority: StockPriorityMode, // Стратегия выбора заготовок/обрезков
 }
 
 impl Default for CutConfig {
@@ -81,6 +104,7 @@ impl Default for CutConfig {
             min_remnant: 1000,
             two_profiles: false,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         }
     }
 }
@@ -170,6 +194,7 @@ pub fn calculate_cutting(
 
     // Run selected strategy or multi-strategy optimization
     let mut candidates = Vec::new();
+    let has_multi_stocks = has_multiple_stock_sizes(stocks);
 
     match config.algorithm {
         CuttingAlgorithm::ColumnGeneration => {
@@ -177,6 +202,13 @@ pub fn calculate_cutting(
                 advanced::solve_column_generation(stocks, &scaled_parts, parts, config, multiplier)
             {
                 candidates.push(plan);
+            }
+            if has_multi_stocks && config.stock_priority != StockPriorityMode::MinBarsCount {
+                if let Ok(plan) =
+                    solve_multi_stock_knapsack(stocks, &scaled_parts, parts, config, multiplier, 0)
+                {
+                    candidates.push(plan);
+                }
             }
         }
         CuttingAlgorithm::BranchAndBound => {
@@ -190,12 +222,31 @@ pub fn calculate_cutting(
             if let Ok(plan) = solve_knapsack_dp(stocks, &scaled_parts, parts, config, multiplier) {
                 candidates.push(plan);
             }
+            if has_multi_stocks {
+                if let Ok(plan) =
+                    solve_multi_stock_knapsack(stocks, &scaled_parts, parts, config, multiplier, 0)
+                {
+                    candidates.push(plan);
+                }
+            }
         }
         CuttingAlgorithm::KnapsackTolerance => {
             if let Ok(plan) =
                 solve_knapsack_dp_with_tolerance(stocks, &scaled_parts, parts, config, multiplier)
             {
                 candidates.push(plan);
+            }
+            if has_multi_stocks {
+                if let Ok(plan) = solve_multi_stock_knapsack(
+                    stocks,
+                    &scaled_parts,
+                    parts,
+                    config,
+                    multiplier,
+                    config.cut_width * 2,
+                ) {
+                    candidates.push(plan);
+                }
             }
         }
         CuttingAlgorithm::BestFit => {
@@ -218,6 +269,34 @@ pub fn calculate_cutting(
         CuttingAlgorithm::Auto | CuttingAlgorithm::MinPatterns => {
             if let Ok(plan) = solve_knapsack_dp(stocks, &scaled_parts, parts, config, multiplier) {
                 candidates.push(plan);
+            }
+            if has_multi_stocks {
+                if let Ok(plan) =
+                    solve_multi_stock_knapsack(stocks, &scaled_parts, parts, config, multiplier, 0)
+                {
+                    candidates.push(plan);
+                }
+                if let Ok(plan) = solve_multi_stock_knapsack(
+                    stocks,
+                    &scaled_parts,
+                    parts,
+                    config,
+                    multiplier,
+                    config.cut_width * 2,
+                ) {
+                    candidates.push(plan);
+                }
+                if let Ok(plan) = solve_knapsack_internal(
+                    stocks,
+                    &scaled_parts,
+                    parts,
+                    config,
+                    multiplier,
+                    0,
+                    Some(StockOrder::RemnantsThenShortest),
+                ) {
+                    candidates.push(plan);
+                }
             }
             if let Ok(plan) = solve_bfd(stocks, &scaled_parts, parts, config, multiplier) {
                 candidates.push(plan);
@@ -252,31 +331,171 @@ pub fn calculate_cutting(
         return Err("Не удалось построить план раскроя".to_string());
     }
 
+    let has_explicit_remnants = stocks.iter().any(|s| s.is_remnant);
+    let treat_limited_as_prio =
+        !has_explicit_remnants && config.stock_priority != StockPriorityMode::MinBarsCount;
+
     if config.algorithm == CuttingAlgorithm::MinPatterns {
         // Prioritize minimal setup changes (fewest distinct patterns) among complete plans
         candidates.sort_by(|a, b| {
             let unplaced_a: u32 = a.unplaced.iter().map(|p| p.quantity).sum();
             let unplaced_b: u32 = b.unplaced.iter().map(|p| p.quantity).sum();
+            let prio_a = priority_consumption_length(a, stocks, treat_limited_as_prio);
+            let prio_b = priority_consumption_length(b, stocks, treat_limited_as_prio);
             unplaced_a
                 .cmp(&unplaced_b)
+                .then_with(|| {
+                    if config.stock_priority == StockPriorityMode::RemnantsFirst {
+                        prio_b.cmp(&prio_a)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| a.patterns.len().cmp(&b.patterns.len()))
-                .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                .then_with(|| {
+                    if config.stock_priority == StockPriorityMode::MinBarsCount {
+                        a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used)
+                    } else {
+                        a.summary.total_stock_length.cmp(&b.summary.total_stock_length)
+                    }
+                })
                 .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
         });
     } else {
-        // Default score: min unplaced -> min total stocks -> min total waste -> fewest pattern types
         candidates.sort_by(|a, b| {
             let unplaced_a: u32 = a.unplaced.iter().map(|p| p.quantity).sum();
             let unplaced_b: u32 = b.unplaced.iter().map(|p| p.quantity).sum();
-            unplaced_a
-                .cmp(&unplaced_b)
-                .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
-                .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
-                .then_with(|| a.patterns.len().cmp(&b.patterns.len()))
+            let prio_a = priority_consumption_length(a, stocks, treat_limited_as_prio);
+            let prio_b = priority_consumption_length(b, stocks, treat_limited_as_prio);
+
+            match config.stock_priority {
+                StockPriorityMode::RemnantsFirst => unplaced_a
+                    .cmp(&unplaced_b)
+                    .then_with(|| prio_b.cmp(&prio_a))
+                    .then_with(|| a.summary.total_stock_length.cmp(&b.summary.total_stock_length))
+                    .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
+                    .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                    .then_with(|| a.patterns.len().cmp(&b.patterns.len())),
+                StockPriorityMode::MinTotalLength => unplaced_a
+                    .cmp(&unplaced_b)
+                    .then_with(|| a.summary.total_stock_length.cmp(&b.summary.total_stock_length))
+                    .then_with(|| prio_b.cmp(&prio_a))
+                    .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
+                    .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                    .then_with(|| a.patterns.len().cmp(&b.patterns.len())),
+                StockPriorityMode::MinBarsCount => unplaced_a
+                    .cmp(&unplaced_b)
+                    .then_with(|| a.summary.total_stocks_used.cmp(&b.summary.total_stocks_used))
+                    .then_with(|| a.summary.total_waste_length.cmp(&b.summary.total_waste_length))
+                    .then_with(|| a.summary.total_stock_length.cmp(&b.summary.total_stock_length))
+                    .then_with(|| a.patterns.len().cmp(&b.patterns.len())),
+            }
         });
     }
 
     Ok(candidates.remove(0))
+}
+
+fn has_multiple_stock_sizes(stocks: &[Stock]) -> bool {
+    let mut first_len: Option<u32> = None;
+    for s in stocks {
+        if s.quantity == Some(0) {
+            continue;
+        }
+        match first_len {
+            None => first_len = Some(s.length),
+            Some(l) if l != s.length => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Computes total length of priority/remnant bars consumed by a candidate plan (capped by stock quantities).
+fn priority_consumption_length(plan: &CuttingPlan, stocks: &[Stock], treat_limited_as_prio: bool) -> u64 {
+    use std::collections::HashMap;
+    let mut prio_cap: HashMap<u32, Option<u32>> = HashMap::new();
+    for s in stocks {
+        let is_prio = s.is_remnant || (treat_limited_as_prio && s.quantity.is_some());
+        if !is_prio {
+            continue;
+        }
+        prio_cap
+            .entry(s.length)
+            .and_modify(|cur| {
+                *cur = match (*cur, s.quantity) {
+                    (None, _) | (_, None) => None,
+                    (Some(a), Some(b)) => Some(a.saturating_add(b)),
+                };
+            })
+            .or_insert(s.quantity);
+    }
+    if prio_cap.is_empty() {
+        return 0;
+    }
+
+    let mut total_prio_len = 0u64;
+    for pat in &plan.patterns {
+        if let Some(cap_opt) = prio_cap.get_mut(&pat.stock_length) {
+            let take = match cap_opt {
+                None => pat.count,
+                Some(rem_q) => {
+                    let t = (*rem_q).min(pat.count);
+                    *rem_q -= t;
+                    t
+                }
+            };
+            total_prio_len += (take as u64) * (pat.stock_length as u64);
+        }
+    }
+    total_prio_len
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StockOrder {
+    LongestFirst,
+    RemnantsThenShortest,
+    RemnantsThenLongest,
+}
+
+pub(crate) fn sort_stocks_for_config(stocks: &[Stock], config: &CutConfig, order_override: Option<StockOrder>) -> Vec<Stock> {
+    let has_explicit_remnants = stocks.iter().any(|s| s.is_remnant);
+    let treat_limited = !has_explicit_remnants && config.stock_priority != StockPriorityMode::MinBarsCount;
+    let is_prio = |s: &Stock| s.is_remnant || (treat_limited && s.quantity.is_some());
+
+    let mode = order_override.unwrap_or(match config.stock_priority {
+        StockPriorityMode::MinBarsCount => {
+            if has_explicit_remnants {
+                StockOrder::RemnantsThenLongest
+            } else {
+                StockOrder::LongestFirst
+            }
+        }
+        StockPriorityMode::RemnantsFirst => StockOrder::RemnantsThenShortest,
+        StockPriorityMode::MinTotalLength => {
+            if has_explicit_remnants || treat_limited {
+                StockOrder::RemnantsThenLongest
+            } else {
+                StockOrder::LongestFirst
+            }
+        }
+    });
+
+    let mut out = stocks.to_vec();
+    match mode {
+        StockOrder::LongestFirst => out.sort_by(|a, b| b.length.cmp(&a.length)),
+        StockOrder::RemnantsThenShortest => out.sort_by(|a, b| {
+            is_prio(b)
+                .cmp(&is_prio(a))
+                .then_with(|| a.length.cmp(&b.length))
+        }),
+        StockOrder::RemnantsThenLongest => out.sort_by(|a, b| {
+            is_prio(b)
+                .cmp(&is_prio(a))
+                .then_with(|| b.length.cmp(&a.length))
+        }),
+    }
+    out
 }
 
 #[derive(Clone)]
@@ -316,7 +535,15 @@ fn solve_knapsack_dp(
     config: &CutConfig,
     multiplier: u32,
 ) -> Result<CuttingPlan, String> {
-    solve_knapsack_internal(stocks, scaled_parts, original_parts, config, multiplier, 0)
+    solve_knapsack_internal(
+        stocks,
+        scaled_parts,
+        original_parts,
+        config,
+        multiplier,
+        0,
+        None,
+    )
 }
 
 /// Strategy 3: Knapsack DP with tolerance
@@ -334,6 +561,7 @@ fn solve_knapsack_dp_with_tolerance(
         config,
         multiplier,
         config.cut_width * 2,
+        None,
     )
 }
 
@@ -344,10 +572,9 @@ fn solve_knapsack_internal(
     config: &CutConfig,
     multiplier: u32,
     tolerance: u32,
+    order_override: Option<StockOrder>,
 ) -> Result<CuttingPlan, String> {
-    let mut available_stocks: Vec<Stock> = stocks.to_vec();
-    // Sort stocks descending by length
-    available_stocks.sort_by(|a, b| b.length.cmp(&a.length));
+    let mut available_stocks = sort_stocks_for_config(stocks, config, order_override);
 
     let mut remaining_items = expand_parts(scaled_parts);
     // Sort items descending by length
@@ -358,7 +585,7 @@ fn solve_knapsack_internal(
     while !remaining_items.is_empty() {
         let min_item_len = remaining_items.last().unwrap().length;
 
-        // Choose stock
+        // Choose first eligible stock matching order (priority/remnant stocks first)
         let stock_idx = available_stocks.iter().position(|s| {
             let usable = s.length.saturating_sub(config.trim_left + config.trim_right);
             let has_qty = s.quantity.map(|q| q > 0).unwrap_or(true);
@@ -371,16 +598,134 @@ fn solve_knapsack_internal(
         };
 
         let stock_len = available_stocks[stock_idx].length;
+        let usable_capacity = stock_len.saturating_sub(config.trim_left + config.trim_right);
+        let chosen_indices = knapsack_best_fit(&remaining_items, usable_capacity, config.cut_width, tolerance);
+
+        if chosen_indices.is_empty() {
+            // None of the remaining items fit this stock (or stock too small for max item -> exhaust/skip it)
+            if let Some(q) = &mut available_stocks[stock_idx].quantity {
+                *q = 0;
+            } else {
+                available_stocks.remove(stock_idx);
+            }
+            continue;
+        }
+
         if let Some(q) = &mut available_stocks[stock_idx].quantity {
             *q = q.saturating_sub(1);
         }
 
-        let usable_capacity = stock_len.saturating_sub(config.trim_left + config.trim_right);
+        let mut chosen_items = Vec::new();
+        for &idx in chosen_indices.iter().rev() {
+            chosen_items.push(remaining_items.remove(idx));
+        }
+        chosen_items.reverse();
 
-        let chosen_indices = knapsack_best_fit(&remaining_items, usable_capacity, config.cut_width, tolerance);
+        raw_patterns.push((stock_len, chosen_items));
+    }
 
-        if chosen_indices.is_empty() {
-            continue;
+    let unplaced = group_unplaced(&remaining_items, multiplier);
+    let patterns = group_patterns(raw_patterns, config, multiplier);
+    let summary = build_summary(original_parts, &patterns, &unplaced, config, multiplier);
+
+    Ok(CuttingPlan {
+        patterns,
+        unplaced,
+        summary,
+    })
+}
+
+/// Multi-stock Knapsack optimizer: evaluates each available stock size per bar and picks
+/// the stock + combination with highest fill efficiency (and remnant priority bonus).
+pub(crate) fn solve_multi_stock_knapsack(
+    stocks: &[Stock],
+    scaled_parts: &[Part],
+    original_parts: &[Part],
+    config: &CutConfig,
+    multiplier: u32,
+    tolerance: u32,
+) -> Result<CuttingPlan, String> {
+    let mut available_stocks = stocks.to_vec();
+    let has_explicit_remnants = available_stocks.iter().any(|s| s.is_remnant);
+    let treat_limited_as_prio =
+        !has_explicit_remnants && config.stock_priority != StockPriorityMode::MinBarsCount;
+
+    let mut remaining_items = expand_parts(scaled_parts);
+    remaining_items.sort_by(|a, b| b.length.cmp(&a.length));
+
+    let max_stock_len = available_stocks
+        .iter()
+        .map(|s| s.length)
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+
+    let mut raw_patterns: Vec<(u32, Vec<PartItem>)> = Vec::new();
+
+    while !remaining_items.is_empty() {
+        let min_item_len = remaining_items.last().unwrap().length;
+
+        let mut seen_keys: Vec<(u32, bool, bool)> = Vec::new();
+        let mut prio_cands: Vec<(usize, f64, Vec<usize>)> = Vec::new();
+        let mut all_cands: Vec<(usize, f64, Vec<usize>)> = Vec::new();
+
+        for (idx, st) in available_stocks.iter().enumerate() {
+            let has_qty = st.quantity.map(|q| q > 0).unwrap_or(true);
+            if !has_qty {
+                continue;
+            }
+            let usable = st.length.saturating_sub(config.trim_left + config.trim_right);
+            if usable < min_item_len + config.cut_width {
+                continue;
+            }
+            let is_prio = st.is_remnant || (treat_limited_as_prio && st.quantity.is_some());
+            let is_limited = st.quantity.is_some();
+            let dedup_key = (st.length, is_prio, is_limited);
+            if seen_keys.contains(&dedup_key) {
+                continue;
+            }
+            seen_keys.push(dedup_key);
+
+            let chosen = knapsack_best_fit(&remaining_items, usable, config.cut_width, tolerance);
+            if chosen.is_empty() {
+                continue;
+            }
+
+            let parts_sum: u32 = chosen.iter().map(|&i| remaining_items[i].length).sum();
+            let fill_ratio = (parts_sum as f64) / (st.length.max(1) as f64);
+            let prio_bonus = if st.is_remnant {
+                0.08
+            } else if is_prio {
+                0.025
+            } else {
+                0.0
+            };
+            let short_tie_bonus = 0.004 * (1.0 - (st.length as f64) / max_stock_len);
+            let score = fill_ratio + prio_bonus + short_tie_bonus;
+
+            if is_prio {
+                prio_cands.push((idx, score, chosen.clone()));
+            }
+            all_cands.push((idx, score, chosen));
+        }
+
+        let pool = if config.stock_priority == StockPriorityMode::RemnantsFirst && !prio_cands.is_empty() {
+            prio_cands
+        } else {
+            all_cands
+        };
+
+        let best = pool.into_iter().max_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let Some((stock_idx, _, chosen_indices)) = best else {
+            break;
+        };
+
+        let stock_len = available_stocks[stock_idx].length;
+        if let Some(q) = &mut available_stocks[stock_idx].quantity {
+            *q = q.saturating_sub(1);
         }
 
         let mut chosen_items = Vec::new();
@@ -439,8 +784,7 @@ fn solve_greedy_fit(
     multiplier: u32,
     mode: GreedyMode,
 ) -> Result<CuttingPlan, String> {
-    let mut available_stocks: Vec<Stock> = stocks.to_vec();
-    available_stocks.sort_by(|a, b| b.length.cmp(&a.length));
+    let mut available_stocks = sort_stocks_for_config(stocks, config, None);
 
     let mut remaining_items = expand_parts(scaled_parts);
     remaining_items.sort_by(|a, b| b.length.cmp(&a.length));
@@ -775,6 +1119,7 @@ mod tests {
             min_remnant: 1000,
             two_profiles: false,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         };
 
         let start = std::time::Instant::now();
@@ -801,6 +1146,7 @@ mod tests {
             min_remnant: 500,
             two_profiles: false,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         };
 
         let plan = calculate_cutting(&stocks, &parts, &config).expect("Calculation failed");
@@ -824,6 +1170,7 @@ mod tests {
             min_remnant: 500,
             two_profiles: true,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         };
 
         let plan = calculate_cutting(&stocks, &parts, &config).expect("Calculation failed");
@@ -844,6 +1191,7 @@ mod tests {
             min_remnant: 100,
             two_profiles: false,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         };
         let plan1 = calculate_cutting(&stocks, &parts, &config_no_trim).unwrap();
         assert_eq!(plan1.summary.total_parts_placed, 1);
@@ -855,6 +1203,7 @@ mod tests {
             min_remnant: 100,
             two_profiles: false,
             algorithm: CuttingAlgorithm::Auto,
+            stock_priority: StockPriorityMode::MinTotalLength,
         };
         let plan2 = calculate_cutting(&stocks, &parts, &config_with_trim).unwrap();
         assert_eq!(plan2.summary.total_parts_placed, 0);
@@ -918,5 +1267,67 @@ mod tests {
             assert_eq!(plan.summary.total_parts_placed, 71);
             assert!(plan.unplaced.is_empty());
         }
+    }
+
+    #[test]
+    fn test_screenshot2_remnant_and_min_total_length() {
+        // Case from user's Screenshot 2: 6000 unlimited, 3200 x 20 (remnant or regular), 2500 unlimited + 3126x20 & smaller parts
+        let stocks = vec![
+            Stock::new(6000, None),
+            Stock::remnant(3200, Some(20)),
+            Stock::new(2500, None),
+        ];
+        let parts = vec![
+            Part::new(586, 4),
+            Part::new(976, 2),
+            Part::new(1256, 2),
+            Part::new(1326, 6),
+            Part::new(1906, 6),
+            Part::new(1981, 1),
+            Part::new(3126, 20),
+        ];
+
+        // Default MinTotalLength uses 3200mm bars for 3126mm pieces, drastically cutting total meters (vs 120m on 6000-only)
+        let cfg = CutConfig {
+            stock_priority: StockPriorityMode::MinTotalLength,
+            ..CutConfig::default()
+        };
+        let plan = calculate_cutting(&stocks, &parts, &cfg).expect("Calculation failed");
+        assert_eq!(plan.summary.total_parts_placed, 41);
+        assert!(plan.unplaced.is_empty());
+        let used_3200: u32 = plan
+            .patterns
+            .iter()
+            .filter(|p| p.stock_length == 3200)
+            .map(|p| p.count)
+            .sum();
+        assert_eq!(used_3200, 20, "All 20 bars of 3200mm should be utilized for 3126mm parts");
+        assert!(
+            plan.summary.total_stock_length <= 96_500,
+            "Total stock length {} should beat 120_000mm",
+            plan.summary.total_stock_length
+        );
+    }
+
+    #[test]
+    fn test_remnants_first_priority_flag() {
+        let stocks = vec![
+            Stock::remnant(2200, Some(3)),
+            Stock::new(6000, None),
+        ];
+        let parts = vec![Part::new(1000, 6), Part::new(2100, 1)];
+        let cfg = CutConfig {
+            stock_priority: StockPriorityMode::RemnantsFirst,
+            ..CutConfig::default()
+        };
+        let plan = calculate_cutting(&stocks, &parts, &cfg).expect("Calculation failed");
+        assert_eq!(plan.summary.total_parts_placed, 7);
+        let used_2200: u32 = plan
+            .patterns
+            .iter()
+            .filter(|p| p.stock_length == 2200)
+            .map(|p| p.count)
+            .sum();
+        assert_eq!(used_2200, 3, "Marked 2200mm remnants must be consumed first");
     }
 }

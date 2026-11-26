@@ -54,14 +54,14 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
         onDoubleClick={onReset}
         title={title || "Потяните для изменения ширины (двойной клик — сброс)"}
         className={`hidden xl:flex self-stretch w-2.5 shrink-0 items-center justify-center cursor-col-resize group select-none z-10 transition-colors ${
-          isDragging ? "bg-[#dd4b19]/15" : "hover:bg-[var(--bg-hover)]"
+          isDragging ? "bg-[var(--accent-subtle)]" : "hover:bg-[var(--bg-hover)]"
         }`}
       >
         <div
           className={`w-[2px] h-14 rounded-full transition-colors ${
             isDragging
-              ? "bg-[#dd4b19]"
-              : "bg-[var(--border-main)] group-hover:bg-[#dd4b19]"
+              ? "bg-[var(--accent)]"
+              : "bg-[var(--border-main)] group-hover:bg-[var(--accent)]"
           }`}
         />
       </div>
@@ -76,14 +76,14 @@ export const ResizeHandle: React.FC<ResizeHandleProps> = ({
       onDoubleClick={onReset}
       title={title || "Потяните для изменения высоты панели (двойной клик — сброс)"}
       className={`h-2.5 w-full flex items-center justify-center cursor-row-resize group select-none transition-colors border-t border-[var(--border-subtle)] ${
-        isDragging ? "bg-[#dd4b19]/15" : "hover:bg-[var(--bg-hover)]"
+        isDragging ? "bg-[var(--accent-subtle)]" : "hover:bg-[var(--bg-hover)]"
       }`}
     >
       <div
         className={`h-[2px] w-10 rounded-full transition-colors ${
           isDragging
-            ? "bg-[#dd4b19]"
-            : "bg-[var(--border-main)] group-hover:bg-[#dd4b19]"
+            ? "bg-[var(--accent)]"
+            : "bg-[var(--border-main)] group-hover:bg-[var(--accent)]"
         }`}
       />
     </div>

@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::{
-    build_summary, expand_parts, group_patterns, solve_bfd, solve_knapsack_dp, CutConfig,
-    CuttingPlan, Part, PartItem, Stock,
+    build_summary, expand_parts, group_patterns, solve_bfd, solve_knapsack_dp,
+    solve_multi_stock_knapsack, sort_stocks_for_config, CutConfig, CuttingPlan, Part, PartItem,
+    Stock, StockPriorityMode,
 };
 
 #[derive(Clone)]
@@ -96,7 +97,7 @@ fn materialize_from_length_patterns(
         }
     }
 
-    let mut rem_stock: Vec<Stock> = stocks.to_vec();
+    let mut rem_stock = sort_stocks_for_config(stocks, config, None);
     for (s_len, _) in &raw_item_patterns {
         if let Some(st) = rem_stock.iter_mut().find(|s| s.length == *s_len && s.quantity.map(|q| q > 0).unwrap_or(true)) {
             if let Some(q) = &mut st.quantity {
@@ -511,9 +512,8 @@ pub fn solve_branch_and_bound(
     let primary = &stock_groups[0];
     let has_single_unlimited_primary = primary.available.is_none() && stock_groups.len() == 1;
     if !has_single_unlimited_primary || types.len() > 14 {
-        // Hybrid B&B-style: compare DP, FFD, BFD and bounded pattern swaps
-        let dp = solve_knapsack_dp(stocks, scaled_parts, original_parts, config, multiplier)?;
-        return Ok(dp);
+        // Hybrid multi-stock fallback respects remnant priorities and total meter minimization
+        return solve_multi_stock_knapsack(stocks, scaled_parts, original_parts, config, multiplier, 0);
     }
 
     let warm = solve_knapsack_dp(stocks, scaled_parts, original_parts, config, multiplier)?;
@@ -712,11 +712,17 @@ pub fn solve_simulated_annealing(
     let n = items.len();
     let lengths: Vec<u32> = items.iter().map(|it| it.length).collect();
 
-    let mut avail_stocks: Vec<Stock> = stocks.to_vec();
-    avail_stocks.sort_by(|a, b| b.length.cmp(&a.length));
+    let avail_stocks = sort_stocks_for_config(stocks, config, None);
+    let has_explicit_remnants = avail_stocks.iter().any(|s| s.is_remnant);
+    let treat_limited_as_prio =
+        !has_explicit_remnants && config.stock_priority != StockPriorityMode::MinBarsCount;
+    let is_prio_stock: Vec<bool> = avail_stocks
+        .iter()
+        .map(|s| s.is_remnant || (treat_limited_as_prio && s.quantity.is_some()))
+        .collect();
 
     // Fast decoder: packs permutation into bars using Best-Fit / First-Fit dynamically
-    let decode = |order: &[usize], use_best_fit: bool| -> (u32, usize, u64, usize, Vec<(u32, Vec<usize>)>) {
+    let decode = |order: &[usize], use_best_fit: bool| -> (u32, u64, u64, usize, u64, usize, Vec<(u32, Vec<usize>)>) {
         struct Bar {
             stock_len: u32,
             rem: u32,
@@ -725,6 +731,8 @@ pub fn solve_simulated_annealing(
         let mut stock_qty: Vec<Option<u32>> = avail_stocks.iter().map(|s| s.quantity).collect();
         let mut bars: Vec<Bar> = Vec::new();
         let mut unplaced = 0u32;
+        let mut total_stock_len = 0u64;
+        let mut prio_len_used = 0u64;
 
         for &item_idx in order {
             let needed = lengths[item_idx] + config.cut_width;
@@ -756,6 +764,10 @@ pub fn solve_simulated_annealing(
                     }
                     let s_len = avail_stocks[si].length;
                     let usable = s_len.saturating_sub(config.trim_left + config.trim_right);
+                    total_stock_len += s_len as u64;
+                    if is_prio_stock[si] {
+                        prio_len_used += s_len as u64;
+                    }
                     bars.push(Bar {
                         stock_len: s_len,
                         rem: usable - needed,
@@ -779,20 +791,27 @@ pub fn solve_simulated_annealing(
             pat_sigs.insert((bar.stock_len, sig), ());
             out_bars.push((bar.stock_len, bar.idxs));
         }
-        (unplaced, out_bars.len(), waste, pat_sigs.len(), out_bars)
+        (unplaced, total_stock_len, prio_len_used, out_bars.len(), waste, pat_sigs.len(), out_bars)
     };
 
-    let scalar_cost = |unplaced: u32, stocks_used: usize, waste: u64, pats: usize| -> f64 {
-        (unplaced as f64) * 1e9
-            + (stocks_used as f64) * 1e6
-            + (waste as f64) * 1.0
-            + (pats as f64) * 150.0
+    let scalar_cost = |eval: &(u32, u64, u64, usize, u64, usize, Vec<(u32, Vec<usize>)>)| -> f64 {
+        let (unplaced, stock_len, prio_len, stocks_used, waste, pats, _) = eval;
+        let base = (*unplaced as f64) * 1e12 + (*waste as f64) * 1.0 + (*pats as f64) * 150.0;
+        match config.stock_priority {
+            StockPriorityMode::RemnantsFirst => {
+                base + (*stock_len as f64) * 100.0 - (*prio_len as f64) * 5000.0
+            }
+            StockPriorityMode::MinTotalLength => {
+                base + (*stock_len as f64) * 1000.0 - (*prio_len as f64) * 10.0
+            }
+            StockPriorityMode::MinBarsCount => base + (*stocks_used as f64) * 1e7,
+        }
     };
 
     let mut cur_order: Vec<usize> = (0..n).collect();
     let mut cur_fit_bf = true;
     let cur_eval = decode(&cur_order, cur_fit_bf);
-    let mut cur_cost = scalar_cost(cur_eval.0, cur_eval.1, cur_eval.2, cur_eval.3);
+    let mut cur_cost = scalar_cost(&cur_eval);
 
     let mut best_eval = cur_eval.clone();
     let mut best_cost = cur_cost;
@@ -830,7 +849,7 @@ pub fn solve_simulated_annealing(
             }
 
             let next_eval = decode(&next_order, next_bf);
-            let next_cost = scalar_cost(next_eval.0, next_eval.1, next_eval.2, next_eval.3);
+            let next_cost = scalar_cost(&next_eval);
             let delta = next_cost - cur_cost;
 
             if delta <= 0.0 || rng.next_f64() < (-delta / temp.max(1.0)).exp() {
@@ -847,8 +866,8 @@ pub fn solve_simulated_annealing(
     }
 
     let mut placed_mask = vec![false; n];
-    let mut raw_patterns: Vec<(u32, Vec<PartItem>)> = Vec::with_capacity(best_eval.4.len());
-    for (s_len, idxs) in best_eval.4 {
+    let mut raw_patterns: Vec<(u32, Vec<PartItem>)> = Vec::with_capacity(best_eval.6.len());
+    for (s_len, idxs) in best_eval.6 {
         let mut bar_items = Vec::with_capacity(idxs.len());
         for idx in idxs {
             placed_mask[idx] = true;

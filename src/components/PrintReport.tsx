@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useId } from "react";
 import {
   CuttingPlan,
   DocumentMeta,
@@ -42,6 +42,8 @@ function PrintSvgBar({
   trimRight: number;
   reportCfg: ReportDisplaySettings;
 }) {
+  const rawPatternId = useId();
+  const hatchPatternId = `print-hatch-${rawPatternId.replace(/:/g, "")}`;
   const W = 760;
   const H =
     reportCfg.diagramBarHeight === "compact"
@@ -61,7 +63,7 @@ function PrintSvgBar({
     >
       <defs>
         <pattern
-          id="print-hatch"
+          id={hatchPatternId}
           width="6"
           height="6"
           patternTransform="rotate(45 0 0)"
@@ -77,7 +79,7 @@ function PrintSvgBar({
           y={0.5}
           width={Math.max(2, trimLeft * scale)}
           height={H - 1}
-          fill="url(#print-hatch)"
+          fill={`url(#${hatchPatternId})`}
           stroke="#000000"
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
@@ -182,7 +184,7 @@ function PrintSvgBar({
               y={0.5}
               width={remW}
               height={H - 1}
-              fill={isReusable ? "#e5e5e5" : "url(#print-hatch)"}
+              fill={isReusable ? "#e5e5e5" : `url(#${hatchPatternId})`}
               stroke="#000000"
               strokeWidth="1.2"
               vectorEffect="non-scaling-stroke"
@@ -210,7 +212,7 @@ function PrintSvgBar({
           y={0.5}
           width={Math.max(2, trimRight * scale)}
           height={H - 1}
-          fill="url(#print-hatch)"
+          fill={`url(#${hatchPatternId})`}
           stroke="#000000"
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"

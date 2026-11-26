@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, [data-theme="dark_emerald"], [data-theme="dark_emerald"] *));
 
 @layer base {
   :root,
@@ -9,6 +9,8 @@
     --bg-subtle: #f8fafc;
     --bg-hover: #eef2f6;
     --bg-muted: #e6ebf2;
+    --bg-tabs: #e7ecf2;
+    --bg-tab-inactive: #dce3ec;
     --border-main: #dfe4ec;
     --border-subtle: #edf1f5;
     --border-input: #cbd5e1;
@@ -35,12 +37,48 @@
     --bar-reusable-text: #0369a1;
   }
 
+  [data-theme="steel_cad"] {
+    --bg-app: #eaeff5;
+    --bg-surface: #ffffff;
+    --bg-subtle: #f4f7fb;
+    --bg-hover: #e4ecf5;
+    --bg-muted: #dce4ee;
+    --bg-tabs: #dbe3ee;
+    --bg-tab-inactive: #cfd9e7;
+    --border-main: #c7d3e2;
+    --border-subtle: #e2e9f2;
+    --border-input: #b8c6d8;
+
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+
+    --sidebar-bg: #1e293b;
+    --sidebar-hover: rgba(255, 255, 255, 0.09);
+    --sidebar-border: rgba(255, 255, 255, 0.11);
+    --sidebar-text: #f8fafc;
+    --sidebar-muted: #94a3b8;
+
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-subtle: rgba(37, 99, 235, 0.12);
+
+    --bar-track: #e2e9f2;
+    --bar-waste-stroke: rgba(15, 23, 42, 0.16);
+    --bar-waste-text: #475569;
+    --bar-reusable-fill: rgba(14, 165, 233, 0.15);
+    --bar-reusable-stroke: rgba(2, 132, 199, 0.48);
+    --bar-reusable-text: #0369a1;
+  }
+
   [data-theme="dark"] {
     --bg-app: #16191f;
     --bg-surface: #1e222a;
     --bg-subtle: #181b21;
     --bg-hover: #262b35;
     --bg-muted: #282d37;
+    --bg-tabs: #12151b;
+    --bg-tab-inactive: #1a1e26;
     --border-main: rgba(255, 255, 255, 0.09);
     --border-subtle: rgba(255, 255, 255, 0.05);
     --border-input: rgba(255, 255, 255, 0.13);
@@ -65,6 +103,40 @@
     --bar-reusable-fill: rgba(56, 189, 248, 0.13);
     --bar-reusable-stroke: rgba(56, 189, 248, 0.4);
     --bar-reusable-text: #38bdf8;
+  }
+
+  [data-theme="dark_emerald"] {
+    --bg-app: #0b0f14;
+    --bg-surface: #141b23;
+    --bg-subtle: #0f151c;
+    --bg-hover: #1b2430;
+    --bg-muted: #1f2a37;
+    --bg-tabs: #080c10;
+    --bg-tab-inactive: #10161d;
+    --border-main: rgba(148, 163, 184, 0.18);
+    --border-subtle: rgba(148, 163, 184, 0.1);
+    --border-input: rgba(148, 163, 184, 0.22);
+
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+
+    --sidebar-bg: #070a0e;
+    --sidebar-hover: rgba(16, 185, 129, 0.1);
+    --sidebar-border: rgba(148, 163, 184, 0.12);
+    --sidebar-text: #f8fafc;
+    --sidebar-muted: #94a3b8;
+
+    --accent: #10b981;
+    --accent-hover: #059669;
+    --accent-subtle: rgba(16, 185, 129, 0.18);
+
+    --bar-track: #0b1016;
+    --bar-waste-stroke: rgba(255, 255, 255, 0.16);
+    --bar-waste-text: #cbd5e1;
+    --bar-reusable-fill: rgba(16, 185, 129, 0.15);
+    --bar-reusable-stroke: rgba(52, 211, 153, 0.45);
+    --bar-reusable-text: #34d399;
   }
 
   body {
@@ -103,6 +175,17 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.55);
+}
+
+/* Hide scrollbars cleanly where custom arrow navigation is used (e.g. tab strip) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Resizable split pane left column width (mobile = 100%, desktop xl+ = user-dragged %) */
@@ -156,5 +239,10 @@
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     margin-bottom: 12px !important;
+  }
+
+  .print-tab-page-break {
+    break-after: page !important;
+    page-break-after: always !important;
   }
 }

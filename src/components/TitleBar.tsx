@@ -56,7 +56,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ appVersion, documentTitle })
         className="flex-1 h-full flex items-center gap-2.5 px-3 min-w-0 cursor-default"
       >
         <div className="flex items-center gap-2 pointer-events-none min-w-0">
-          <MobilLogo height={14} showWordmark={false} accentColor="#dd4b19" color="#f1f5f9" />
+          <MobilLogo height={14} showWordmark={false} accentColor="var(--accent)" color="#f1f5f9" />
           <span className="text-[11.5px] font-semibold tracking-tight text-slate-100 whitespace-nowrap">
             Раскрой Про
           </span>

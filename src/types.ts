@@ -2,6 +2,7 @@ export interface Stock {
   id?: string;
   length: number;
   quantity?: number;
+  is_remnant?: boolean; // true = обрезок/остаток со склада (расходуется в первую очередь)
 }
 
 export interface Part {
@@ -119,6 +120,43 @@ export const CUTTING_ALGORITHMS: CuttingAlgorithmInfo[] = [
   },
 ];
 
+export type StockPriorityMode = 'min_total_length' | 'remnants_first' | 'min_bars_count';
+
+export interface StockPriorityInfo {
+  id: StockPriorityMode;
+  name: string;
+  shortLabel: string;
+  badge: string;
+  description: string;
+}
+
+export const STOCK_PRIORITY_MODES: StockPriorityInfo[] = [
+  {
+    id: 'min_total_length',
+    name: 'Экономия метража и обрезков',
+    shortLabel: 'Метраж + остатки',
+    badge: 'Рекомендуется',
+    description:
+      'Минимизирует общий расход погонных метров материала и автоматически задействует подходящие короткие/ограниченные заготовки со склада (например, 3200 мм под деталь 3126 мм) вместо лишних длинных хлыстов.',
+  },
+  {
+    id: 'remnants_first',
+    name: 'Строго обрезки в 1-ю очередь',
+    shortLabel: 'Обрезки 1-е',
+    badge: 'Склад остатков',
+    description:
+      'В первую очередь принудительно расходует заготовки с отметкой «Обрезок» (а при их отсутствии — партии с заданным количеством штук) до полного исчерпания, и только затем переходит на целые хлысты.',
+  },
+  {
+    id: 'min_bars_count',
+    name: 'Минимум хлыстов (длинные сначала)',
+    shortLabel: 'Мин. хлыстов',
+    badge: 'Серийный',
+    description:
+      'Классический режим: старается уложить заказ в наименьшее число заготовок в штуках, начиная подбор с самых длинных хлыстов (6000 мм и выше).',
+  },
+];
+
 export interface CutConfig {
   cut_width: number;
   trim_left: number;
@@ -126,6 +164,7 @@ export interface CutConfig {
   min_remnant: number;
   two_profiles: boolean;
   algorithm?: CuttingAlgorithm;
+  stock_priority?: StockPriorityMode;
 }
 
 export type RemnantType = 'Waste' | 'Reusable';
@@ -174,8 +213,73 @@ export interface AnglePreset {
 }
 
 export type CalcMode = 'instant' | 'timer' | 'manual';
-export type AppTheme = 'light' | 'dark';
+export type AppTheme = 'light' | 'steel_cad' | 'dark' | 'dark_emerald';
 export type BarDensity = 'compact' | 'normal' | 'tall';
+
+export interface AppThemeInfo {
+  id: AppTheme;
+  name: string;
+  badge: string;
+  description: string;
+  isDark: boolean;
+  preview: {
+    bg: string;
+    surface: string;
+    sidebar: string;
+    accent: string;
+  };
+}
+
+export const APP_THEMES: AppThemeInfo[] = [
+  {
+    id: 'light',
+    name: 'Светлая классическая',
+    badge: 'По умолчанию',
+    description:
+      'Бело-серые карточки, тёмная шапка и фирменный терракотовый акцент. Высокая читаемость при дневном свете.',
+    isDark: false,
+    preview: { bg: '#f1f3f6', surface: '#ffffff', sidebar: '#151c24', accent: '#dd4b19' },
+  },
+  {
+    id: 'steel_cad',
+    name: 'Сталь и индиго (CAD)',
+    badge: 'Инженерная',
+    description:
+      'Холодный технический фон, стальная навигация и строгий синий акцент в стиле конструкторских САПР.',
+    isDark: false,
+    preview: { bg: '#eaeff5', surface: '#ffffff', sidebar: '#1e293b', accent: '#2563eb' },
+  },
+  {
+    id: 'dark',
+    name: 'Тёмная графитовая',
+    badge: 'Вечер / Цех',
+    description:
+      'Мягкий графитовый фон без бликов с акцентом на фаски и линии распила для работы при приглушённом свете.',
+    isDark: true,
+    preview: { bg: '#16191f', surface: '#1e222a', sidebar: '#12151b', accent: '#dd4b19' },
+  },
+  {
+    id: 'dark_emerald',
+    name: 'Тёмный изумруд (Контраст)',
+    badge: 'У станка',
+    description:
+      'Глубокий антрацит с контрастными границами карточек и изумрудным акцентом для цеховых мониторов.',
+    isDark: true,
+    preview: { bg: '#0b0f14', surface: '#141b23', sidebar: '#070a0e', accent: '#10b981' },
+  },
+];
+
+export interface ImportOptions {
+  splitByMaterialAndColor: boolean;
+  mergeDuplicateParts: boolean;
+  roundFractionalUp: boolean;
+}
+
+export const DEFAULT_IMPORT_OPTIONS: ImportOptions = {
+  splitByMaterialAndColor: true,
+  mergeDuplicateParts: true,
+  roundFractionalUp: true,
+};
 
 export interface ReportDisplaySettings {
   defaultTitle: string;
@@ -222,6 +326,9 @@ export interface AppSettings {
   timerSeconds: number;
   autoRecalcOnFocus: boolean;
   autoCheckUpdates: boolean;
+  defaultStockLength: number;
+  sidebarPinned: boolean;
+  importOptions: ImportOptions;
   anglePresets: AnglePreset[];
   companyName: string;
   companyLogo: 'mobil' | 'custom' | 'none';
@@ -230,6 +337,24 @@ export interface AppSettings {
   machineName: string;
   operatorName: string;
   reportConfig?: ReportDisplaySettings;
+}
+
+export interface CuttingTab {
+  id: string;
+  title: string;
+  article?: string;
+  colour?: string;
+  sourceFile?: string;
+  meta: DocumentMeta;
+  stocks: Stock[];
+  parts: Part[];
+  config: CutConfig;
+  plan: CuttingPlan | null;
+  loading: boolean;
+  error: string | null;
+  calcTimeMs: number | null;
+  lastCalculatedAt: string | null;
+  isDirty: boolean;
 }
 
 export interface UpdateCheckResult {
